@@ -355,3 +355,43 @@ def test_alto_and_json_plans_are_unchanged_without_the_new_flags():
         assert plan["split"]["cmd"] == [py, "page_split.py", "data_samples/ALTO", page_dir]
         assert plan["extract"]["cmd"] == [py, script]
         assert plan["classify"]["cmd"] == [py, "classify_TEXT.py"]
+
+
+def test_document_json_bridge_chains_stages_onto_a_seed_keyed_unlike_the_input(tmp_path):
+    """(atrium-project#68) `--document-json` seeds the scratch dir under the doc_id derived
+    from the input file, and every stage looks the record up under that name. A seed keyed
+    by another id (an AMČR file id) used to be written to `<seed id>.document.json` instead,
+    so each stage re-read the untouched seed, the last stage's write replaced the others',
+    and `--document-json-out` received the seed copy."""
+    import shutil
+
+    from atrium_document import DocumentRecord, load_document
+    from document_hook import write_document_block
+    from run_pipeline import _collect_document_json_output, _prepare_document_json_bridge
+
+    seed_id = "C-202000543A-DT-27"
+    with DocumentRecord(seed_id, "page-classification", out_dir=str(tmp_path)) as doc:
+        doc.set_source(sha256="a" * 64, filename="scan.alto.xml", origin="ABBYY-ALTO")
+        doc.merge_block("pages", [{"page": "1", "category": "Text", "category_confidence": 0.91}])
+
+    scratch = _prepare_document_json_bridge(str(tmp_path / f"{seed_id}.document.json"), "scan")
+    try:
+        # Two stages, each a separate process in a real run, sharing only the directory.
+        lines = [{"page": "1", "line": 1, "text": "a line", "categ": "Clear", "quality_score": 0.9}]
+        write_document_block(str(scratch), "scan", run_id="r1", merge_blocks={"lines": lines})
+        pages = [{"page": "1", "quality_score": 0.9, "quality_band": "Clear"}]
+        write_document_block(str(scratch), "scan", run_id="r2", merge_blocks={"pages": pages})
+
+        out_path = tmp_path / "out" / "3_alto.json"
+        _collect_document_json_output(scratch, "scan", str(out_path))
+        left_in_scratch = sorted(p.name for p in scratch.iterdir())
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
+
+    record = load_document(str(out_path))
+    assert record["doc_id"] == seed_id
+    assert record["lines"][0]["text"] == "a line"  # stage 1 survived stage 2
+    assert record["pages"] == [
+        {"page": "1", "category": "Text", "category_confidence": 0.91, "quality_score": 0.9, "quality_band": "Clear"}
+    ]
+    assert left_in_scratch == ["scan.document.json"]  # no second, seed-named copy

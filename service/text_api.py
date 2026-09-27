@@ -515,7 +515,7 @@ async def process_document(
                 # so this must merge — set_blocks would erase their co-owned fields
                 # (category/category_confidence, teitok_surface, lemma/upos/feats, ...)
                 # on any document that already carries a baseline record.
-                write_document_block(
+                record_path = write_document_block(
                     document_json_dir=doc_tmp_dir,
                     doc_id=doc_id,
                     run_id=para_logger.run_id,
@@ -523,8 +523,10 @@ async def process_document(
                     merge_blocks={"pages": page_metrics, "lines": lines_metrics},
                 )
 
-                # Read back the accreted record and attach it to the response
-                with open(baseline_path, "r", encoding="utf-8") as bf:
+                # Read back the record from the path the hook wrote (atrium-project#68), not
+                # from a name re-derived here. With nothing written (a foreign-origin record,
+                # say) the uploaded baseline goes back unchanged.
+                with open(record_path or baseline_path, "r", encoding="utf-8") as bf:
                     result["document_json_out"] = json.load(bf)
         # ------------------------------------
 

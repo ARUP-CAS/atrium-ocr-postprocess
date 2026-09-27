@@ -313,14 +313,14 @@ _CLASSIFIED_LINES = [
 _DOC_ID = "CTX000000001"
 
 
-def _real_baseline(tmp_path, pages=("7", "8", "9")):
+def _real_baseline(tmp_path, pages=("7", "8", "9"), doc_id=_DOC_ID):
     """A baseline as the pipeline would really hand it over: page-classification's own
     block plus its fields on the shared `pages` rows, and the immutable `source`."""
-    with DocumentRecord(_DOC_ID, "page-classification", out_dir=str(tmp_path)) as doc:
-        doc.set_source(sha256="a" * 64, filename=f"{_DOC_ID}.alto.xml", origin="ABBYY-ALTO")
+    with DocumentRecord(doc_id, "page-classification", out_dir=str(tmp_path)) as doc:
+        doc.set_source(sha256="a" * 64, filename=f"{doc_id}.alto.xml", origin="ABBYY-ALTO")
         doc.merge_block("pages", [{"page": p, "category": "Text", "category_confidence": 0.91} for p in pages])
         doc.set_block("page_categories", {p: "Text" for p in pages})
-    return tmp_path / f"{_DOC_ID}.document.json"
+    return tmp_path / f"{doc_id}.document.json"
 
 
 @patch("service.text_api.text_manager.process_alto", create=True)
@@ -442,6 +442,42 @@ def test_process_refuses_to_attribute_a_multipage_upload(mock_process, tmp_path,
     assert "lines" not in record
     assert record["pages"] == json.loads(baseline_path.read_text(encoding="utf-8"))["pages"]
     assert "2 <Page> elements" in caplog.text
+
+
+# ── (atrium-project#68) a seed keyed unlike the upload ────────────────────────
+#
+# An AMČR seed carries the AMČR file id as its doc_id, and the upload has another name.
+# DocumentRecord keeps the seed's id (_inherit_doc_id), but finalize() wrote the record to
+# `<seed id>.document.json` while this endpoint read back `<id derived from the upload's
+# name>.document.json`, so the response was the untouched seed: 200, a valid record, and no
+# alto-postprocess field in it.
+
+_SEED_ID = "C-202000543A-DT-27"
+
+
+@patch("service.text_api.text_manager.process_alto", create=True)
+def test_process_accretes_onto_a_seed_keyed_unlike_the_upload(mock_process, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mock_process.return_value = {"type": "alto_xml", "cleaned_lines": _CLASSIFIED_LINES}
+    seed_path = _real_baseline(tmp_path, pages=("7",), doc_id=_SEED_ID)
+
+    response = client.post(
+        "/process",
+        files={
+            "file": ("scan_0001.alto.xml", _ONE_PAGE_ALTO.encode("utf-8"), "application/xml"),
+            "document_record": ("seed.document.json", seed_path.read_bytes(), "application/json"),
+        },
+        data={"task_type": "auto"},
+    )
+    assert response.status_code == 200
+    record = response.json()["document_json_out"]
+
+    assert record["doc_id"] == _SEED_ID
+    assert [line["text"] for line in record["lines"]] == [entry["text"] for entry in _CLASSIFIED_LINES]
+    assert record["assembled"]["blocks"]["lines"]["program"] == "alto-postprocess"
+    page7 = record["pages"][0]
+    assert page7["quality_score"] == 0.5
+    assert page7["category"] == "Text"  # the seed's own field on the same row
 
 
 # ── (#31 Phase 4) one status mapping: unsupported → 400, unreadable → 422 ─────

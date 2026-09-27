@@ -375,6 +375,24 @@ def test_guard_reads_the_origin_of_this_calls_source_when_no_baseline(tmp_path):
     assert not record.get("pages")
 
 
+def test_write_document_block_writes_back_in_place_onto_a_seed_keyed_differently(tmp_path):
+    """(atrium-project#68) The record keeps the seed's doc_id, but it is written back to the
+    file it was read from. finalize()'s default is `<seed id>.document.json`, which no later
+    stage and no caller looks up: the next write_document_block() call re-read the untouched
+    seed and the one after it overwrote this one."""
+    doc_dir = str(tmp_path)
+    _seed_source(doc_dir, "C-202000543A-DT-27", "ABBYY-ALTO")
+    os.replace(document_path(doc_dir, "C-202000543A-DT-27"), document_path(doc_dir, "scan"))
+
+    written = write_document_block(doc_dir, "scan", run_id="r1", merge_blocks={"lines": _LINES})
+
+    assert written == document_path(doc_dir, "scan")
+    assert sorted(os.listdir(doc_dir)) == ["scan.document.json"]
+    record = load_document(written)
+    assert record["doc_id"] == "C-202000543A-DT-27"
+    assert record["lines"][0]["text"] == "a line"
+
+
 # ── (#31 Phase 4) SOURCE_ORIGIN_BY_KIND ───────────────────────────────────────
 
 

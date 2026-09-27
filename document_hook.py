@@ -270,11 +270,21 @@ def write_document_block(
     source: Optional[Dict[str, Any]] = None,
     set_blocks: Optional[Dict[str, Any]] = None,
     merge_blocks: Optional[Dict[str, List[Dict[str, Any]]]] = None,
-) -> None:
+) -> Optional[str]:
     """Open `<doc_id>.document.json` under `document_json_dir` (if configured and if
     it already exists), apply this stage's own contribution, and write it back in
     place. A missing baseline is safe (rule 3): the record then holds just this
     stage's part. No-ops entirely when `document_json_dir` is falsy.
+
+    Returns the path written, or None when nothing was written. Callers read the
+    record back from that path (atrium-project#68).
+
+    "In place" is literal: the record goes back to `path`, not to finalize()'s default
+    `<record doc_id>.document.json`. The two differ whenever the baseline is keyed by
+    another id than the one derived here (an AMČR seed carries the AMČR file id), and
+    DocumentRecord keeps the baseline's id. Writing to the default name left the file
+    every stage and caller looks up untouched, so the next stage re-read the seed, the
+    last stage's write replaced all earlier ones, and /process returned the seed.
 
     This is the repo's single document-write chokepoint — every stage script routes
     through it — so it is also where the two Layer D guarantees are enforced once
@@ -342,6 +352,8 @@ def write_document_block(
                 # fields it owns, plus the block's key fields.
                 doc.assert_fields_survived(block, records)
         _validate_own_output(doc, baseline_was_invalid)
+        # Explicitly, and to `path` (#68): see the docstring. __exit__ then has nothing left to do.
+        return doc.finalize(path)
 
 
 def group_tasks_by_doc(tasks: Iterable[Sequence[Any]]) -> "OrderedDict[str, List[Any]]":

@@ -365,6 +365,8 @@ def _prepare_document_json_bridge(document_json: Optional[str], doc_id: Optional
 
 
 def _collect_document_json_output(scratch_dir: Path, doc_id: str, document_json_out: str) -> None:
+    # The seeded name, even when the record inside is keyed by another id: every stage
+    # writes back to the file it read (document_hook.write_document_block, atrium-project#68).
     record = scratch_dir / f"{doc_id}.document.json"
     if not record.exists():
         print(
