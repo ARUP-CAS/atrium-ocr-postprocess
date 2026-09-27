@@ -340,6 +340,14 @@ strict failure stops the pipeline after that stage.
 | `MAX_LINES_PER_PAGE` | 100000  | a real page over it is refused; a block over it (a sheet, a JSON child, a form-feed section) continues on pages labelled `<label>+1`, `+2`, … |
 | `READER_TIMEOUT_S`   | 300     | a PDF that hangs PDFium. PDFs are read in a **separate process**, so a crash or hang costs one file (`timeout`, `reader_crashed`)             |
 
+Each of these keys is also an environment setting (atrium-project#53): `ATRIUM_TEXT_INGEST_<KEY>`, e.g.
+`ATRIUM_TEXT_INGEST_MAX_PAGES=500`. The variable wins over the config file, the file over the default above; a
+malformed value stops the run or the service naming it. The service reports every cap's current value in
+`GET /info` (`limits`; `limits_meta` names the variable and where the value came from). Two reader caps that
+used to be fixed are settings too, not config keys: `ATRIUM_TEXT_INGEST_ODF_REPEAT_CAP` (100 — repeats of one
+ODS/ODT cell or row read, noted `sheet_repeat_capped`) and `ATRIUM_TEXT_INGEST_PDF_OBJECT_CAP` (20000 — objects
+of a PDF page scanned for its text layer, noted `pdf_objects_capped`).
+
 XML is parsed without entity resolution, DTD loading or network access, and with libxml2's size and
 depth limits on. A document that declares entities is refused (`xml_entity_declaration`). Broken XML
 gets one retry in recovery mode, noted `xml_recovered` (`partial`) — except the `<name>…</n>` quirk
@@ -396,22 +404,25 @@ The lossy notes are `xml_recovered`, `decode_replacement`, `jsonl_bad_records=N`
 
 ### Reason codes
 
-The HTTP column is the status the service answers with (§7).
+The HTTP column is the status the service answers with (§7). Every error body is
+`{"status", "reason", "detail"}` with `detail` starting with the code; the limit codes answer with
+`reason: "limit_exceeded"` and a `limit` member naming the setting (atrium-project#53 — `too_large` and
+`zip_limits_exceeded` were 422 before; they are refusals of an input over a limit, so 413 now).
 
 | Code                                  | Meaning                                                                                                                          | HTTP |
 |---------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|------|
 | `empty_file`                          | zero bytes (also an empty compressed stream)                                                                                     | 422  |
-| `too_large`                           | a size/page/line cap was exceeded                                                                                                | 422  |
+| `too_large`                           | a size/page/line cap was exceeded                                                                                                | 413  |
 | `binary_content`                      | not text and not a supported container                                                                                           | 400  |
 | `legacy_office_unsupported`           | OLE2 `.doc/.xls/.ppt`; save it as DOCX/XLSX/PPTX                                                                                 | 400  |
 | `image_needs_ocr`                     | an image (or a ZIP of images); run OCR first and feed its output (ALTO, PAGE XML, hOCR, Tesseract TSV, TXT)                      | 400  |
 | `archive_unsupported`                 | an archive this repo does not read: tar, 7z, RAR, zstd, a ZIP without page files, a container inside a compressed file or bundle | 400  |
-| `zip_limits_exceeded`                 | ZIP or decompression caps above                                                                                                  | 422  |
+| `zip_limits_exceeded`                 | ZIP or decompression caps above                                                                                                  | 413  |
 | `xml_entity_declaration`              | XML with `<!ENTITY>`                                                                                                             | 422  |
 | `malformed`                           | broken for its format (bad JSON, unparseable XML/CSV, too deeply nested)                                                         | 422  |
 | `corrupt`                             | the container or compressed stream could not be opened                                                                           | 422  |
 | `encrypted`                           | password- or DRM-protected                                                                                                       | 422  |
-| `timeout` / `reader_crashed`          | the isolated PDF reader hung or died                                                                                             | 422  |
+| `timeout` / `reader_crashed`          | the isolated PDF reader hung or died (`timeout` with `reason: "limit_exceeded"`: `READER_TIMEOUT_S`)                             | 422  |
 | `dependency_missing`                  | `pypdfium2` (PDF) or `lxml` not installed                                                                                        | 400  |
 | `decode_failed`                       | no configured encoding decodes the text                                                                                          | 422  |
 | `no_text`                             | read fine, but no text lines. For a PDF: no text layer on any page, so run OCR first                                             | 422  |

@@ -60,4 +60,7 @@ exclude = [
     "tests/test_logging_contract.py",
     "tests/test_env_contract.py",
     "tests/test_schema_freeze.py",
+    "atrium_limits.py",
+    "tests/test_atrium_limits.py",
+    "tests/test_limits_contract.py",
 ]

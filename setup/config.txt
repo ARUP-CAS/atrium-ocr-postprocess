@@ -500,6 +500,9 @@ GHOST_HITS_INVERTED_MIN     = 1
 # extract_TEXT_2_TXT.py) and for /process uploads (read once at service start;
 # KEEP_BLANK_LINES and STRICT are batch-only). docs/text_inputs.md has the per-format
 # page/line rules and the reason codes these limits produce.
+# (atrium-project#53) Every cap below can also be set as the environment variable
+# ATRIUM_TEXT_INGEST_<KEY> (e.g. ATRIUM_TEXT_INGEST_MAX_PAGES), which wins over this
+# file; tool_limits.py declares them and the service's GET /info reports them.
 #
 # Hard caps — a file over any of them is refused (reason `too_large` or
 # `zip_limits_exceeded`) and the run continues with the next file.

@@ -55,6 +55,9 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from urllib.parse import unquote
 
+import tool_limits
+from tool_limits import ODF_REPEAT_CAP, PDF_OBJECT_CAP
+
 logger = logging.getLogger(__name__)
 
 # ── reason codes ──────────────────────────────────────────────────────────────
@@ -204,11 +207,16 @@ def load_settings(cfg=None) -> Tuple[Limits, ReaderOptions]:
     Missing section or keys fall back to the dataclass defaults; malformed values
     raise ValueError naming the key, so a typo in the config fails the run loudly
     instead of silently disabling a cap.
+
+    Every cap is also an environment setting, ``ATRIUM_TEXT_INGEST_<KEY>``
+    (atrium-project#53, tool_limits.py), applied last so it wins over the file for the
+    service and the batch pipeline alike; a malformed one raises
+    ``atrium_limits.LimitConfigError`` (a ValueError), naming the variable.
     """
     section = "TEXT_INGEST"
     lim, opt = Limits(), ReaderOptions()
     if cfg is None or not cfg.has_section(section):
-        return lim, opt
+        return _with_env_limits(lim, opt)
 
     def _num(key, default, cast, minimum, maximum=None):
         raw = cfg.get(section, key, fallback="").strip()
@@ -263,6 +271,28 @@ def load_settings(cfg=None) -> Tuple[Limits, ReaderOptions]:
         keep_blank_lines=_bool("KEEP_BLANK_LINES", opt.keep_blank_lines),
         notes_placement=notes_placement,
     )
+    return _with_env_limits(lim, opt)
+
+
+def _with_env_limits(lim: Limits, opt: ReaderOptions) -> Tuple[Limits, ReaderOptions]:
+    """The caps with their ``ATRIUM_TEXT_INGEST_*`` overrides applied (atrium-project#53).
+
+    Each config value (or dataclass default) is its LimitSpec's fallback, so an unset
+    variable changes nothing: environment → config file → default.
+    """
+    L = tool_limits
+    lim = replace(
+        lim,
+        max_file_mb=L.MAX_FILE_MB.get(config=lim.max_file_mb),
+        zip_max_members=L.ZIP_MAX_MEMBERS.get(config=lim.zip_max_members),
+        zip_max_total_mb=L.ZIP_MAX_TOTAL_MB.get(config=lim.zip_max_total_mb),
+        zip_max_member_mb=L.ZIP_MAX_MEMBER_MB.get(config=lim.zip_max_member_mb),
+        zip_max_ratio=L.ZIP_MAX_RATIO.get(config=lim.zip_max_ratio),
+        max_pages=L.MAX_PAGES.get(config=lim.max_pages),
+        max_lines_per_page=L.MAX_LINES_PER_PAGE.get(config=lim.max_lines_per_page),
+        reader_timeout_s=L.READER_TIMEOUT_S.get(config=lim.reader_timeout_s),
+    )
+    opt = replace(opt, max_line_chars=L.MAX_LINE_CHARS.get(config=opt.max_line_chars))
     return lim, opt
 
 
@@ -2726,7 +2756,11 @@ def _xml_as_plain_text(data: bytes, ctx: "_Ctx") -> List[TextPage]:
 
 # ── readers: PDF (pypdfium2, isolated) ────────────────────────────────────────
 
-_PDF_OBJECT_CAP = 20000
+#: Objects scanned per PDF page to judge its text layer. A setting since atrium-project#53
+#: (ATRIUM_TEXT_INGEST_PDF_OBJECT_CAP in tool_limits.py, read per document); this name is
+#: its default, kept for the callers that import it. A page over it is noted
+#: `pdf_objects_capped` — its text is still read in full.
+_PDF_OBJECT_CAP = PDF_OBJECT_CAP.default
 #: A text object counts as rotated when its matrix turns more than about 1°
 #: (tan 1° ≈ 0.0175): OCR layers of deskewed scans tilt by fractions of a degree.
 _PDF_ROTATION_TOL = 0.0175
@@ -2791,6 +2825,7 @@ def read_pdf(path: str, ctx: "_Ctx") -> List[TextPage]:
         n_pages = len(pdf)
         if n_pages > ctx.limits.max_pages:
             raise IngestError("too_large", f"{n_pages} pages > MAX_PAGES={ctx.limits.max_pages}")
+        object_cap = PDF_OBJECT_CAP.get()
         pages = []
         for i in range(n_pages):
             try:
@@ -2810,7 +2845,9 @@ def read_pdf(path: str, ctx: "_Ctx") -> List[TextPage]:
                         max_depth=4,
                     )
                 ):
-                    if n >= _PDF_OBJECT_CAP:
+                    if n >= object_cap:
+                        if "pdf_objects_capped" not in ctx.notes:
+                            ctx.notes.append("pdf_objects_capped")
                         break
                     level = getattr(obj, "level", 0) or 0
                     if obj.type == pdfium_c.FPDF_PAGEOBJ_FORM:
@@ -3329,7 +3366,9 @@ def _odf_headers_with_text(styles) -> int:
     return n
 
 
-_ODF_REPEAT_CAP = 100
+#: Most repeats of one ODF cell or row read. A setting since atrium-project#53
+#: (ATRIUM_TEXT_INGEST_ODF_REPEAT_CAP, read per sheet); this name is its default.
+_ODF_REPEAT_CAP = ODF_REPEAT_CAP.default
 #: Cell content that is not the cell's text: comments and notes.
 _ODF_CELL_SKIP = {"annotation", "note"}
 
@@ -3367,6 +3406,7 @@ def _ods_sheet_lines(table, ctx) -> List[str]:
     XLSX). Repeats are capped at _ODF_REPEAT_CAP (noted: the rest is not read)."""
     lines: List[str] = []
     capped = False
+    cap = ODF_REPEAT_CAP.get()
     for row in table.iter("{*}table-row"):
         cells = []
         for cell in row:
@@ -3382,17 +3422,17 @@ def _ods_sheet_lines(table, ctx) -> List[str]:
                 repeat = int(_odf_attr(cell, "number-columns-repeated", "1"))
             except ValueError:
                 repeat = 1
-            capped |= repeat > _ODF_REPEAT_CAP
-            cells.extend([text] * max(1, min(repeat, _ODF_REPEAT_CAP)))
+            capped |= repeat > cap
+            cells.extend([text] * max(1, min(repeat, cap)))
         if not cells:
             continue
         try:
             repeat = int(_odf_attr(row, "number-rows-repeated", "1"))
         except ValueError:
             repeat = 1
-        capped |= repeat > _ODF_REPEAT_CAP
+        capped |= repeat > cap
         line = "\t".join(cells)
-        for _ in range(max(1, min(repeat, _ODF_REPEAT_CAP))):
+        for _ in range(max(1, min(repeat, cap))):
             _charge(ctx, len(line))
             lines.append(line)
     if capped and "sheet_repeat_capped" not in ctx.notes:
@@ -3921,6 +3961,11 @@ def read_zip_bundle(path: str, ctx: "_Ctx") -> List[TextPage]:
     if skipped:
         ctx.notes.append(f"zip_members_skipped={len(skipped)}")
         ctx.notes.extend(f"bundle_member_failed:{name}:{code}" for name, code in skipped[:5])
+    over = sum(1 for _name, why in skipped if why == "too_large")
+    if over:
+        # The members skipped because of MAX_FILE_MB, apart from the other skips, so the
+        # service can report that limit (limits_applied, atrium-project#53).
+        ctx.notes.append(f"zip_members_over_max_file_mb={over}")
     if duplicates:
         ctx.notes.append(f"bundle_duplicates_skipped={duplicates}")
     if ignored:

@@ -76,6 +76,8 @@ jobs:
           cp atrium_document.py \
              atrium_document.schema.json \
              atrium_paradata.py \
+             atrium_limits.py \
+             tool_limits.py \
              atrium_vocab.py \
              atrium_vocab.schema.json \
              para_licenses.py \

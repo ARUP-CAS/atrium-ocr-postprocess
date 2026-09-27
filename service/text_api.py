@@ -7,7 +7,7 @@ import asyncio
 import json
 import logging
 import os
-import shutil
+import re
 import sys
 import tempfile
 from collections import OrderedDict
@@ -50,13 +50,15 @@ for _bootstrap_path in (_repo_root, _current_dir):
 # `atrium_service` is the shared ATRIUM meta-contract helper (§4), byte-identical
 # across every service and enforced by para-drift.reusable.yml.
 from atrium_service import (  # noqa: E402
+    AtriumHTTPError,
     ServiceState,
     add_cors,
+    attach_error_handlers,
     attach_health,
     attach_inflight_middleware,
     build_info,
     read_tool_version,
-    resolve_max_upload_mb,
+    read_upload_bounded,
     serve_lifecycle,
 )
 from text_inference import ingest_settings, text_manager  # noqa: E402
@@ -73,14 +75,29 @@ from utils import parse_alto_page_labels  # noqa: E402
 # (`python service/text_api.py`, the `api` stage ENTRYPOINT), where the image died at
 # import. Keep them below the bootstrap; `tests/test_service_entrypoint.py` enforces it.
 from atrium_document import canonical_doc_id, resolve_originator  # noqa: E402
+from atrium_limits import LimitExceeded, LimitNotes  # noqa: E402
 from atrium_paradata import ParadataLogger  # noqa: E402
 from document_hook import PROGRAM_NAME, quality_band, write_document_block  # noqa: E402
 from text_formats import READERS, IngestError, compression_of, sniff_kind  # noqa: E402
+from tool_limits import (  # noqa: E402
+    LIMITS,
+    MAX_FILE_MB,
+    MAX_LINES_PER_PAGE,
+    MAX_PAGES,
+    MAX_UPLOAD,
+    READER_TIMEOUT_S,
+    ZIP_MAX_MEMBER_MB,
+    ZIP_MAX_MEMBERS,
+    ZIP_MAX_RATIO,
+    ZIP_MAX_TOTAL_MB,
+)
 
 logger = logging.getLogger(__name__)
 
-# Canonical upload limit (§4.5): MAX_UPLOAD_MB, with a MAX_UPLOAD_BYTES fallback.
-MAX_UPLOAD_MB = resolve_max_upload_mb(25)
+# Every limit this service has is declared in tool_limits.py (atrium-project#53, factor III)
+# and read per request. These are the import-time values, kept for the callers and tests
+# that import them.
+MAX_UPLOAD_MB = MAX_UPLOAD.get()
 MAX_UPLOAD_BYTES = int(MAX_UPLOAD_MB * 1024 * 1024)
 
 
@@ -88,22 +105,76 @@ MAX_UPLOAD_BYTES = int(MAX_UPLOAD_MB * 1024 * 1024)
 _state = ServiceState()
 
 #: (#31 Phase 4) Reason codes that mean "this service does not read this kind of
-#: file" — a 400, and a retry will not help. Every other code (corrupt, encrypted,
-#: malformed, no_text, a limit, a timeout, ...) means the file is of a supported kind
-#: but unreadable — a 422. One mapping for every path, sniffed or explicit.
+#: file" — a 400, and a retry will not help. The limit codes below are refusals of a
+#: supported file that is over a [TEXT_INGEST] limit. Every other code (corrupt,
+#: encrypted, malformed, no_text, ...) means the file is of a supported kind but
+#: unreadable — a 422. One mapping for every path, sniffed or explicit.
 UNSUPPORTED_REASONS = frozenset(
     {"binary_content", "legacy_office_unsupported", "image_needs_ocr", "archive_unsupported", "dependency_missing"}
 )
 
+#: (atrium-project#53) The reader codes that mean "over a limit". They answer with the
+#: harmonised `reason: "limit_exceeded"` and the status the limit's cause calls for: 413
+#: for a size or count (too_large, zip_limits_exceeded — they used to be 422), 422 for the
+#: reader's time budget (timeout). alto's own code stays at the start of `detail`.
+LIMIT_REASONS = frozenset({"too_large", "zip_limits_exceeded", "timeout"})
 
-def _ingest_http_error(exc: IngestError, *, sniffing: bool = False) -> HTTPException:
-    status = 400 if exc.code in UNSUPPORTED_REASONS else 422
+#: The [TEXT_INGEST] limits by their config key, which is how a reader message names one
+#: ("… > MAX_PAGES=20000").
+_INGEST_LIMITS = {
+    spec.key.upper(): spec
+    for spec in (
+        MAX_FILE_MB,
+        ZIP_MAX_MEMBERS,
+        ZIP_MAX_TOTAL_MB,
+        ZIP_MAX_MEMBER_MB,
+        ZIP_MAX_RATIO,
+        MAX_PAGES,
+        MAX_LINES_PER_PAGE,
+        READER_TIMEOUT_S,
+    )
+}
+_INGEST_LIMIT_NAME = re.compile(r"\b(" + "|".join(sorted(_INGEST_LIMITS, key=len, reverse=True)) + r")\b")
+
+
+def _ingest_http_error(exc: IngestError, *, sniffing: bool = False) -> Exception:
+    """The HTTP error for a reader failure: 400 unsupported, 413/422 ``limit_exceeded``, else 422."""
     detail = f"{exc.code}: {exc.message}"
+    if exc.code in LIMIT_REASONS:
+        match = _INGEST_LIMIT_NAME.search(exc.message)
+        if match:
+            spec = _INGEST_LIMITS[match.group(1)]
+            return LimitExceeded(
+                spec.key,
+                LIMITS.get(spec.key),
+                None,
+                unit=spec.unit,
+                env=spec.env,
+                http_status=spec.http_status,
+                detail=f"{detail} (setting: {spec.env}, or [TEXT_INGEST] {match.group(1)} in the config)",
+            )
+        # A limit the reader did not name (an RTF over any cap, out of memory while reading).
+        return AtriumHTTPError(422 if exc.code == "timeout" else 413, detail, reason="limit_exceeded")
+    status = 400 if exc.code in UNSUPPORTED_REASONS else 422
     if sniffing and status == 400:
         detail = (
             f"Cannot auto-detect a supported file type ({detail}). Set task_type='alto', 'text', 'json' or 'document'."
         )
     return HTTPException(status_code=status, detail=detail)
+
+
+#: At most this many UTF-8 bytes of the client's file name go into the temporary file's
+#: name, which keeps its extension for sniffing and stays far below the OS's 255-byte limit.
+_MAX_SUFFIX_BYTES = 100
+
+
+def _temp_suffix(filename: str) -> str:
+    """``_<name>`` for the upload's temporary file: the client's base name only (a name with
+    a path, or one over the OS name limit, used to fail the request with a bare 500), its
+    tail kept so the extension survives."""
+    base = Path(filename.replace("\\", "/")).name
+    tail = base.encode("utf-8")[-_MAX_SUFFIX_BYTES:].decode("utf-8", errors="ignore")
+    return f"_{tail}" if tail not in ("", ".", "..") else ""
 
 
 @asynccontextmanager
@@ -140,6 +211,8 @@ app = FastAPI(
     lifespan=lifespan,
 )
 attach_inflight_middleware(app, _state)
+# §4.4 error body {status, reason, detail} for every error (atrium-project#32 item 2, #53).
+attach_error_handlers(app)
 
 # CORS — standard §4.5 configuration; default "*" for parity with sibling services.
 add_cors(app, methods=["GET", "POST"])
@@ -356,7 +429,7 @@ async def info() -> Dict[str, Any]:
     return build_info(
         app,
         service="atrium-alto-postprocess",
-        limits={"max_upload_mb": MAX_UPLOAD_MB},
+        limits=LIMITS,
         status="active",
         device=text_manager.device,
         supported_formats=["ALTO XML (.xml)", "Plain Text (.txt)", "Generic JSON (.json)"]
@@ -403,8 +476,10 @@ async def process_document(
 
     Errors name the reason code: 400 for a file of a kind this service does not read
     (binary_content, legacy_office_unsupported, image_needs_ocr, archive_unsupported,
-    dependency_missing), 422 for a supported kind that cannot be read (corrupt,
-    encrypted, malformed, no_text, a size limit, ...).
+    dependency_missing), 413 `limit_exceeded` for a file over a size or count limit
+    (too_large, zip_limits_exceeded; 422 for the reader's time limit, timeout), 422 for a
+    supported kind that cannot be read (corrupt, encrypted, malformed, no_text, ...).
+    Every response carries `limits_applied` (atrium-project#53).
 
     Returns a list of classified lines.  Each entry carries:
 
@@ -455,17 +530,28 @@ async def process_document(
 
     _refuse_if_draining()
 
-    # Initialize ParadataLogger with the required config argument and unified program name
-    para_logger = ParadataLogger(config=PARA_CONFIG_PATH, program=PROGRAM_NAME)
+    # Initialize ParadataLogger with the required config argument and unified program name.
+    # config_dir: this repo keeps para_config.txt under setup/, and the logger looks for it in
+    # config_dir — at the default "." it found nothing, so every API record said
+    # tool_version "unknown" with no components (atrium-project#53 D9; #67 R2 returns it).
+    para_logger = ParadataLogger(
+        config=PARA_CONFIG_PATH, program=PROGRAM_NAME, config_dir=str(Path(PARA_CONFIG_PATH).parent)
+    )
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as tmp:
-        shutil.copyfileobj(file.file, tmp)
+    # Read in bounded chunks and refused once over MAX_UPLOAD_MB (413 limit_exceeded), rather
+    # than copied to disk whole and measured afterwards (atrium-project#53).
+    upload_mb = MAX_UPLOAD.get()
+    content = await read_upload_bounded(file, upload_mb, "File")
+    with tempfile.NamedTemporaryFile(delete=False, suffix=_temp_suffix(file.filename)) as tmp:
+        tmp.write(content)
         tmp_path = tmp.name
+    del content
+
+    # Every limit that shapes this result without refusing it (atrium-project#53): passed
+    # down explicitly, returned as `limits_applied` and recorded in the paradata.
+    notes = LimitNotes()
 
     try:
-        if os.path.getsize(tmp_path) > MAX_UPLOAD_BYTES:
-            raise HTTPException(status_code=413, detail=f"File too large. Maximum size is {MAX_UPLOAD_MB} MB.")
-
         if task_type == "sniff":
             try:
                 kind = await asyncio.to_thread(sniff_kind, tmp_path, ingest_settings()[0])
@@ -481,30 +567,32 @@ async def process_document(
         # an event-loop callback — could not run until the whole document finished, which
         # made --timeout-graceful-shutdown meaningless here.
         if task_type == "alto":
-            result = await asyncio.to_thread(text_manager.process_alto, tmp_path)
+            result = await asyncio.to_thread(text_manager.process_alto, tmp_path, notes=notes)
         elif task_type == "json":
-            result = await asyncio.to_thread(text_manager.process_json, tmp_path)
+            result = await asyncio.to_thread(text_manager.process_json, tmp_path, notes=notes)
         elif task_type == "document":
             try:
-                result = await asyncio.to_thread(text_manager.process_document, tmp_path)
+                result = await asyncio.to_thread(text_manager.process_document, tmp_path, notes=notes)
             except IngestError as exc:
                 raise _ingest_http_error(exc) from exc
         else:
             try:
-                result = await asyncio.to_thread(text_manager.process_text_file, tmp_path)
+                result = await asyncio.to_thread(text_manager.process_text_file, tmp_path, notes=notes)
             except IngestError as exc:
                 raise _ingest_http_error(exc) from exc
 
         result["filename"] = file.filename
+        result["limits_applied"] = notes.as_list()
 
         # --- Paradata Pair Accretion Hook ---
         if document_record:
             with tempfile.TemporaryDirectory() as doc_tmp_dir:
                 baseline_path = os.path.join(doc_tmp_dir, f"{doc_id}.document.json")
 
-                # Save the uploaded baseline JSON
+                # Save the uploaded baseline JSON — bounded like the file (atrium-project#53):
+                # it used to be copied whole, with no limit at all.
                 with open(baseline_path, "wb") as bf:
-                    shutil.copyfileobj(document_record.file, bf)
+                    bf.write(await read_upload_bounded(document_record, upload_mb, "document_record"))
 
                 # (#10 J1) Real lines + real per-page rows, both derived from this
                 # request — see _accretion_records for what was fabricated before.
@@ -530,10 +618,11 @@ async def process_document(
                     result["document_json_out"] = json.load(bf)
         # ------------------------------------
 
+        para_logger.note_limits(notes)
         para_logger.finalize()
         return JSONResponse(content=result)
 
-    except HTTPException:
+    except (HTTPException, LimitExceeded):
         raise
     except Exception as exc:
         import traceback

@@ -507,14 +507,42 @@ def test_a_text_upload_that_is_not_text_is_400():
     assert response.status_code == 400 and response.json()["detail"].startswith("binary_content")
 
 
-def test_every_reason_code_maps_to_400_or_422():
-    from service.text_api import UNSUPPORTED_REASONS, _ingest_http_error
+def test_every_reason_code_maps_to_400_413_or_422():
+    """400 unsupported; the limit codes 413 (size/count) or 422 (the reader's time budget),
+    with reason `limit_exceeded` (atrium-project#53); everything else 422."""
+    from atrium_limits import LimitExceeded
+    from service.text_api import LIMIT_REASONS, UNSUPPORTED_REASONS, _ingest_http_error
     from text_formats import REASON_CODES, IngestError
 
     assert UNSUPPORTED_REASONS <= set(REASON_CODES)
+    assert LIMIT_REASONS <= set(REASON_CODES)
     for code in REASON_CODES:
-        status = _ingest_http_error(IngestError(code)).status_code
-        assert status == (400 if code in UNSUPPORTED_REASONS else 422), code
+        error = _ingest_http_error(IngestError(code))
+        if isinstance(error, LimitExceeded):  # always answered with reason limit_exceeded
+            status, reason = error.http_status, "limit_exceeded"
+        else:
+            status, reason = error.status_code, getattr(error, "reason", None)
+        if code in UNSUPPORTED_REASONS:
+            assert (status, reason) == (400, None), code
+        elif code == "timeout":
+            assert (status, reason) == (422, "limit_exceeded"), code
+        elif code in LIMIT_REASONS:
+            assert (status, reason) == (413, "limit_exceeded"), code
+        else:
+            assert (status, reason) == (422, None), code
+
+
+def test_a_named_ingest_limit_is_refused_with_the_limit_member():
+    from atrium_limits import LimitExceeded
+    from service.text_api import _ingest_http_error
+    from text_formats import IngestError
+
+    error = _ingest_http_error(IngestError("too_large", "25000 pages > MAX_PAGES=20000"))
+    assert isinstance(error, LimitExceeded) and error.http_status == 413
+    assert (error.key, error.env, error.value) == ("max_pages", "ATRIUM_TEXT_INGEST_MAX_PAGES", 20000)
+    assert error.detail.startswith("too_large: 25000 pages > MAX_PAGES=20000")
+    timeout = _ingest_http_error(IngestError("timeout", "reader exceeded READER_TIMEOUT_S=300s"))
+    assert timeout.http_status == 422 and timeout.key == "reader_timeout_s"
 
 
 @patch("service.text_api.text_manager.process_document", create=True)

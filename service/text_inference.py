@@ -39,7 +39,9 @@ except ImportError:
     logger.critical("'v3' folder not found in project root — layout reordering unavailable.")
     prepare_inputs = boxes2inputs = parse_logits = None  # type: ignore[assignment]
 
-# Import the full quality-analysis toolkit from the main pipeline module.
+# Every limit of this service, declared once (atrium-project#53, factor III); stdlib only.
+#
+# Below it, the full quality-analysis toolkit from the main pipeline module.
 # Unconditional on purpose: the service must never silently fall back to a
 # stale secondary categoriser — a broken import has to fail loud at startup.
 # extract_JSON_2_TXT's key-whitelist walk has no heavy dependencies (stdlib
@@ -47,6 +49,8 @@ except ImportError:
 # the ALTO parsing below, which is deliberately mirrored (#8) to avoid pulling
 # extract_LytRdr_ALTO_2_TXT's eager torch/transformers/pandas imports into a
 # module that must stay importable without ML libraries installed.
+import tool_limits  # noqa: E402
+from atrium_limits import LimitNotes  # noqa: E402
 from classify_TEXT import score_line  # noqa: E402
 from document_hook import parse_origin_by_kind, resolve_input_origin  # noqa: E402
 from extract_JSON_2_TXT import page_text_lines  # noqa: E402
@@ -79,15 +83,21 @@ MODEL_DIR = Path(os.getenv("MODEL_DIR", str(project_root / "models")))
 FASTTEXT_MODEL_PATH = MODEL_DIR / "lid.176.bin"
 
 # LayoutReader chunk sizes (#8): same defaults as extract_LytRdr_ALTO_2_TXT's
-# [EXTRACT] LR_CHUNK_SIZE/LR_MIN_CHUNK_SIZE, but env-var configured here since
-# the service otherwise has no dependency on setup/config.txt.
-LR_CHUNK_SIZE = int(os.getenv("LR_CHUNK_SIZE", 350))
-LR_MIN_CHUNK_SIZE = int(os.getenv("LR_MIN_CHUNK_SIZE", 50))
+# [EXTRACT] LR_CHUNK_SIZE/LR_MIN_CHUNK_SIZE, environment settings here. Limits since
+# atrium-project#53 (tool_limits.py, read per page); these names are their values at
+# import, kept for the callers and tests that read them.
+LR_CHUNK_SIZE = tool_limits.LR_CHUNK_SIZE.get()
+LR_MIN_CHUNK_SIZE = tool_limits.LR_MIN_CHUNK_SIZE.get()
 
-# (#31) Lines per perplexity forward pass for document uploads: calculate_perplexity_batch
-# pads one batch to its longest line, so a 500-page PDF must not be one batch. Same as
-# the batch pipeline's [CLASSIFY].BATCH_SIZE default.
-DOCUMENT_BATCH_LINES = 128
+# (#31) Lines per perplexity forward pass: calculate_perplexity_batch pads one batch to
+# its longest line, so a 500-page PDF must not be one batch. Same as the batch pipeline's
+# [CLASSIFY].BATCH_SIZE default. A limit since atrium-project#53 (PPL_BATCH_LINES), applied
+# to EVERY path — the ALTO, JSON and text paths used to score a whole file in one batch,
+# where any failure scored every line 99999. This name is its value at import.
+DOCUMENT_BATCH_LINES = tool_limits.PPL_BATCH_LINES.get()
+
+#: What calculate_perplexity_batch returns for every line of a batch it could not score.
+_PPL_FAILED = 99999.0
 
 
 class TextModelManager:
@@ -140,6 +150,7 @@ class TextModelManager:
             self.ppl_model.to(self.device)
 
             self.ppl_model.eval()
+            tool_limits.set_ppl_max_tokens(self.ppl_max_tokens())
 
             self._models_loaded = True
             logger.info("All models loaded successfully.")
@@ -149,19 +160,38 @@ class TextModelManager:
             self._models_loaded = False
             raise RuntimeError(f"Failed to load core text-processing models: {exc}") from exc
 
-    def _classify_lines(self, lines: List[str]) -> List[Dict[str, Any]]:
+    def ppl_max_tokens(self) -> Optional[int]:
+        """Tokens of one line the perplexity model reads — exactly the window
+        text_util.calculate_perplexity_batch truncates at."""
+        config = getattr(self.ppl_model, "config", None)
+        if config is None:
+            return None
+        return getattr(config, "max_position_embeddings", getattr(config, "n_positions", 1024))
+
+    def _classify_lines(self, lines: List[str], notes: Optional[LimitNotes] = None) -> List[Dict[str, Any]]:
         """Score and categorise a list of already-split text lines.
 
         Shared by process_text_file / process_json / process_alto so all three
         formats classify identically once they've each produced an ordered
-        list of lines. Perplexity is computed once for the whole batch (#8),
-        mirroring how classify_TEXT.py favours batched GPU perplexity over a
-        per-line model call.
+        list of lines. Perplexity is batched (#8), mirroring how classify_TEXT.py
+        favours batched GPU perplexity over a per-line model call — in batches of
+        PPL_BATCH_LINES (atrium-project#53), so one file is never one padded batch.
+
+        With *notes*, records a line the perplexity model read only in part
+        (``ppl_max_tokens``, ``trimmed``) and a batch it could not score
+        (``ppl_batch_lines``, ``skipped``: its lines carry perplexity 99999).
         """
         if not lines:
             return []
 
-        ppls = calculate_perplexity_batch(lines, self.ppl_model, self.ppl_tokenizer, self.device)
+        batch = tool_limits.PPL_BATCH_LINES.get()
+        ppls: List[float] = []
+        for start in range(0, len(lines), batch):
+            chunk = lines[start : start + batch]
+            scores = calculate_perplexity_batch(chunk, self.ppl_model, self.ppl_tokenizer, self.device)
+            ppls.extend(scores)
+            if notes is not None:
+                self._note_perplexity(chunk, scores, notes)
         cleaned_lines: List[Dict[str, Any]] = []
         for line_num, (text, ppl) in enumerate(zip(lines, ppls, strict=True), start=1):
             entry = _classify_line(
@@ -176,7 +206,35 @@ class TextModelManager:
             cleaned_lines.append(entry)
         return cleaned_lines
 
-    def process_text_file(self, path: str) -> Dict[str, Any]:
+    def _note_perplexity(self, chunk: List[str], scores: List[float], notes: LimitNotes) -> None:
+        if chunk and all(score == _PPL_FAILED for score in scores):
+            notes.note(
+                tool_limits.PPL_BATCH_LINES,
+                "skipped",
+                len(chunk),
+                "line(s) whose perplexity batch failed were scored 99999 (worst quality)",
+            )
+            return
+        window = self.ppl_max_tokens()
+        if not window or self.ppl_tokenizer is None:
+            return
+        # A token is at least one byte here, so only a line longer than the window in
+        # bytes can be over it in tokens; only those are tokenised a second time.
+        long_lines = [line for line in chunk if len(line.encode("utf-8")) > window]
+        try:
+            cut = sum(1 for line in long_lines if len(self.ppl_tokenizer(line)["input_ids"]) > window)
+        except Exception:  # a tokenizer that cannot say must not fail the request
+            return
+        if cut:
+            notes.note(
+                "ppl_max_tokens",
+                "trimmed",
+                cut,
+                f"line(s) longer than the perplexity model's {window}-token window were scored on their start",
+                value=window,
+            )
+
+    def process_text_file(self, path: str, notes: Optional[LimitNotes] = None) -> Dict[str, Any]:
         """Classify a plain-text upload, one line per non-empty line.
 
         (#31 Phase 4) Decoded and shaped like the batch text-lines path: any common
@@ -190,10 +248,13 @@ class TextModelManager:
         lines: List[str] = []
         if data:
             text, _enc, _flags = decode_bytes(data, options.fallback_encodings)
+            _note_wrapped(text.splitlines(), options.max_line_chars, notes)
             lines = shape_lines([text], options.max_line_chars, keep_blank=False)
-        return {"type": "plain_text", "cleaned_lines": self._classify_lines(lines)}
+        return {"type": "plain_text", "cleaned_lines": self._classify_lines(lines, notes)}
 
-    def process_document(self, path: str, kind: Optional[str] = None) -> Dict[str, Any]:
+    def process_document(
+        self, path: str, kind: Optional[str] = None, notes: Optional[LimitNotes] = None
+    ) -> Dict[str, Any]:
         """Classify any other text-bearing upload (#31): PDF, DOCX, ODT, XLSX, PPTX, ...
 
         Reads the file with the same text_formats readers and the same line shaping
@@ -211,13 +272,16 @@ class TextModelManager:
         doc = read_document_isolated(path, limits, options, kind=kind)
         if doc.line_count() == 0:
             raise IngestError("no_text", no_text_message(doc))
+        _note_reader_limits(doc.notes, notes)
         cleaned: List[Dict[str, Any]] = []
         pages: List[Dict[str, Any]] = []
+        batch = tool_limits.PPL_BATCH_LINES.get()
         for n, page in enumerate(doc.pages, 1):
+            _note_wrapped(page.lines, options.max_line_chars, notes)
             lines = shape_lines(page.lines, options.max_line_chars, keep_blank=False)
             entries: List[Dict[str, Any]] = []
-            for start in range(0, len(lines), DOCUMENT_BATCH_LINES):
-                entries.extend(self._classify_lines(lines[start : start + DOCUMENT_BATCH_LINES]))
+            for start in range(0, len(lines), batch):
+                entries.extend(self._classify_lines(lines[start : start + batch], notes))
             for line_num, entry in enumerate(entries, start=1):
                 entry["line_num"] = line_num
                 entry["page"] = str(n)
@@ -243,7 +307,7 @@ class TextModelManager:
             "cleaned_lines": cleaned,
         }
 
-    def process_json(self, path: str) -> Dict[str, Any]:
+    def process_json(self, path: str, notes: Optional[LimitNotes] = None) -> Dict[str, Any]:
         """Classify a generic JSON OCR upload.
 
         Extracts ordered text lines with the same walk extract_JSON_2_TXT.py
@@ -255,9 +319,9 @@ class TextModelManager:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         lines = page_text_lines(data)
-        return {"type": "json", "cleaned_lines": self._classify_lines(lines)}
+        return {"type": "json", "cleaned_lines": self._classify_lines(lines, notes)}
 
-    def process_alto(self, path: str) -> Dict[str, Any]:
+    def process_alto(self, path: str, notes: Optional[LimitNotes] = None) -> Dict[str, Any]:
         """Classify an ALTO XML upload: parse -> reorder -> dehyphenate -> classify.
 
         Uses the line-level parser (parse_alto_xml_lines), not the word-level
@@ -272,7 +336,9 @@ class TextModelManager:
         norm_boxes = normalize_boxes(boxes, page_w, page_h)
 
         if boxes2inputs is not None and self.layout_model is not None:
-            ordered_lines, ordered_boxes = _run_layout_reader(lines, norm_boxes, self.layout_model, self.device)
+            ordered_lines, ordered_boxes = _run_layout_reader(
+                lines, norm_boxes, self.layout_model, self.device, notes=notes
+            )
         else:
             # v3.helpers unavailable: fall back to document order rather than
             # failing the whole request (#8; mirrors the startup warning above).
@@ -299,21 +365,87 @@ class TextModelManager:
             if merged_text.strip():
                 resolved_lines.append(merged_text.strip())
 
-        return {"type": "alto_xml", "cleaned_lines": self._classify_lines(resolved_lines)}
+        return {"type": "alto_xml", "cleaned_lines": self._classify_lines(resolved_lines, notes)}
 
 
-def _run_layout_reader(lines: List[str], norm_boxes: List[List[int]], layout_model, device):
+def _note_wrapped(lines, max_chars: int, notes: Optional[LimitNotes]) -> None:
+    """Record lines longer than MAX_LINE_CHARS, which shape_lines wraps (``split``)."""
+    if notes is None or not max_chars:
+        return
+    wrapped = sum(1 for line in lines if len(line.strip()) > max_chars)
+    notes.note(
+        tool_limits.MAX_LINE_CHARS,
+        "split",
+        wrapped,
+        f"line(s) longer than {max_chars} characters were wrapped and classified as several lines",
+        value=max_chars,
+    )
+
+
+#: Reader notes (text_formats) that mean a limit shaped what was read, by the limit, the
+#: effect and a sentence. The reader runs in an isolated subprocess for a PDF; its notes
+#: come back in the document it returns, which is how they reach the request.
+_READER_LIMIT_NOTES = {
+    "page_overflow_split": (
+        tool_limits.MAX_LINES_PER_PAGE,
+        "split",
+        "a page over MAX_LINES_PER_PAGE lines was split onto continuation pages",
+    ),
+    "zip_members_over_max_file_mb": (
+        tool_limits.MAX_FILE_MB,
+        "skipped",
+        "ZIP member(s) over MAX_FILE_MB were not read",
+    ),
+    "sheet_repeat_capped": (
+        tool_limits.ODF_REPEAT_CAP,
+        "trimmed",
+        "repeated spreadsheet cells or rows over the cap were read once per cap",
+    ),
+    "pdf_objects_capped": (
+        tool_limits.PDF_OBJECT_CAP,
+        "sampled",
+        "a PDF page's text layer was judged on its first objects (its text was read in full)",
+    ),
+}
+
+
+def _note_reader_limits(doc_notes, notes: Optional[LimitNotes]) -> None:
+    if notes is None:
+        return
+    for raw in doc_notes:
+        name, _, count = str(raw).partition("=")
+        entry = _READER_LIMIT_NOTES.get(name)
+        if entry is None:
+            continue
+        spec, effect, detail = entry
+        notes.note(spec, effect, int(count) if count.isdigit() else 1, detail)
+
+
+def _run_layout_reader(lines: List[str], norm_boxes: List[List[int]], layout_model, device, notes=None):
     """Predict LayoutReader reading order for one page's lines, chunked with
     CUDA-OOM halving/retry. Mirrors extract_LytRdr_ALTO_2_TXT.extract_single_page's
     inference loop (#8), factored out as a reusable function since the service
     processes one page per request rather than a CSV of many.
+
+    With *notes* (atrium-project#53): a page ordered in more than one window is recorded
+    (``lr_chunk_size``, ``split``), and a page left in document order because even the
+    smallest window ran out of memory (``lr_min_chunk_size``, ``skipped``) — that fallback
+    used to be a log line only.
     """
     import torch
 
     full_ordered_lines: List[str] = []
     full_ordered_boxes: List[List[int]] = []
 
-    chunk_size = LR_CHUNK_SIZE
+    chunk_size = tool_limits.LR_CHUNK_SIZE.get()
+    min_chunk_size = tool_limits.LR_MIN_CHUNK_SIZE.get()
+    if notes is not None and len(lines) > chunk_size:
+        notes.note(
+            tool_limits.LR_CHUNK_SIZE,
+            "split",
+            1,
+            f"a page of {len(lines)} lines was ordered in windows of {chunk_size} lines",
+        )
     i = 0
     while i < len(lines):
         chunk_lines = lines[i : i + chunk_size]
@@ -345,8 +477,15 @@ def _run_layout_reader(lines: List[str], norm_boxes: List[List[int]], layout_mod
                 raise
             torch.cuda.empty_cache()
             chunk_size = chunk_size // 2
-            if chunk_size < LR_MIN_CHUNK_SIZE:
+            if chunk_size < min_chunk_size:
                 logger.error("LayoutReader OOM even at minimum chunk size; falling back to document order.")
+                if notes is not None:
+                    notes.note(
+                        tool_limits.LR_MIN_CHUNK_SIZE,
+                        "skipped",
+                        1,
+                        "a page's reading order was left as in the document: LayoutReader ran out of memory",
+                    )
                 return lines, norm_boxes
             logger.warning("LayoutReader OOM: retrying at i=%d with chunk_size=%d.", i, chunk_size)
 
@@ -369,7 +508,7 @@ def ingest_settings():
     """
     cfg = configparser.ConfigParser(inline_comment_prefixes=None)
     cfg.read(os.getenv("LANGID_CONFIG", str(project_root / "setup" / "config.txt")), encoding="utf-8")
-    limits, options = load_settings(cfg)
+    limits, options = load_settings(cfg)  # applies the ATRIUM_TEXT_INGEST_* overrides (#53)
     configured = cfg.get("DOCUMENT", "SOURCE_ORIGIN", fallback="").strip()
     by_kind = parse_origin_by_kind(cfg.get("DOCUMENT", "SOURCE_ORIGIN_BY_KIND", fallback=""), READERS)
     return limits, options, configured, by_kind

@@ -26,6 +26,8 @@ Two frontend variants are included: a **standalone** interface (`frontend/`) and
   * [Standalone Frontend 🖥️](#standalone-frontend-)
   * [LINDAT-integrated Frontend 🎨](#lindat-integrated-frontend-)
 * [Configuration (environment) ⚙️](#configuration-environment-)
+* [Limits 📏](#limits)
+* [Errors 🚨](#errors)
 * [Contacts 📧](#contacts-)
 * [Acknowledgements 🙏](#acknowledgements-)
 
@@ -132,13 +134,13 @@ are assigned by a fast CPU pre-filter before any model inference. The remaining 
 
 ### Endpoints 🔗
 
-| Method | Path       | Description                                                                                                                                                               |
-|--------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `GET`  | `/`        | Serves the standalone `index.html` interface for manual testing.                                                                                                          |
-| `GET`  | `/info`    | Service identity + capabilities: `service`, `version`, `endpoints`, `limits`, plus status, device, line fields, quality categories.                                       |
-| `GET`  | `/health`  | Liveness probe — 200 always, even mid-shutdown. `?deep=true` also checks the quality/language models are loaded (503 on failure or while draining).                       |
-| `GET`  | `/ready`   | Readiness probe (issue #55) — 503 until model load finishes, 200 while serving, 503 the instant `SIGTERM` arrives. The Kubernetes `readinessProbe`/`startupProbe` target. |
-| `POST` | `/process` | Uploads a file for layout analysis, cleaning, and line-level classification.                                                                                              |
+| Method | Path       | Description                                                                                                                                                                                            |
+|--------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `GET`  | `/`        | Serves the standalone `index.html` interface for manual testing.                                                                                                                                       |
+| `GET`  | `/info`    | Service identity + capabilities: `service`, `version`, `endpoints`, `limits` (every [limit](#limits)), `limits_meta` (the variable behind each), plus status, device, line fields, quality categories. |
+| `GET`  | `/health`  | Liveness probe — 200 always, even mid-shutdown. `?deep=true` also checks the quality/language models are loaded (503 on failure or while draining).                                                    |
+| `GET`  | `/ready`   | Readiness probe (issue #55) — 503 until model load finishes, 200 while serving, 503 the instant `SIGTERM` arrives. The Kubernetes `readinessProbe`/`startupProbe` target.                              |
+| `POST` | `/process` | Uploads a file for layout analysis, cleaning, and line-level classification.                                                                                                                           |
 
 ### Request Example 💻
 
@@ -152,7 +154,11 @@ are assigned by a fast CPU pre-filter before any model inference. The remaining 
 * `task_type`: `alto`, `text`, `json`, `document`, or `auto` (default). `auto` maps `.txt`→`text` and
   `.json`→`json` by extension; `.xml` and every other upload are decided **from the bytes** — an ALTO root →
   `alto`, anything else readable → `document`. An unsupported file (image, legacy `.doc`, other binary) is a
-  `400` naming the reason code; an unreadable document (encrypted, corrupt, no text) is a `422`.
+  `400` naming the reason code; a document over a [limit](#limits) is a `413` (`422` for the reader's time
+  limit) with `reason: "limit_exceeded"`; an unreadable document (encrypted, corrupt, no text) is a `422`.
+
+Every response carries `limits_applied`: the limits that shaped the result without refusing it (see
+[Limits](#limits)), `[]` when none did.
 
 ```bash
 curl -X POST "http://localhost:8000/process" \
@@ -433,6 +439,61 @@ other four use; the environment contract is identical either way.
 > ⚠️ `HOST=127.0.0.1` yields a container that reports **healthy** and serves nobody:
 > `service/healthcheck.py` always probes loopback by design and never reads `HOST`, so a
 > loopback bind passes every probe while being unreachable from outside the container.
+
+## Limits
+
+Every limit this service has (atrium-project#53). Each is an environment setting, declared once in
+[`tool_limits.py`](../tool_limits.py), reported with its current value in `GET /info` `limits` and with the
+variable that sets it in `limits_meta`. The `[TEXT_INGEST]` caps are also keys of the config file
+(`LANGID_CONFIG`, `setup/config.txt`), which the batch pipeline reads: the variable wins over the file, and the
+file over the default below. A malformed value stops the service at startup, naming it. Over a limit the
+service **refuses** (`reason: "limit_exceeded"`) or **processes the input in full** and says how the limit
+shaped the result, in the response's `limits_applied` (and the paradata). `tests/test_limits_contract.py`
+checks this table against `tool_limits.py` and `.env.example`.
+
+| Key (`/info`)        | Variable                                | Default | Unit    | Over the limit                                                                                              |
+|----------------------|-----------------------------------------|---------|---------|-------------------------------------------------------------------------------------------------------------|
+| `max_upload_mb`      | `MAX_UPLOAD_MB`                         | 25      | MB      | 413 `limit_exceeded` — per part: the file and the document record                                           |
+| `max_file_mb`        | `ATRIUM_TEXT_INGEST_MAX_FILE_MB`        | 256     | MB      | 413 `limit_exceeded` (`too_large`); a ZIP member over it is not read — `skipped` note                       |
+| `zip_max_members`    | `ATRIUM_TEXT_INGEST_ZIP_MAX_MEMBERS`    | 10000   | members | 413 `limit_exceeded` (`zip_limits_exceeded`)                                                                |
+| `zip_max_total_mb`   | `ATRIUM_TEXT_INGEST_ZIP_MAX_TOTAL_MB`   | 1024    | MB      | 413 `limit_exceeded`                                                                                        |
+| `zip_max_member_mb`  | `ATRIUM_TEXT_INGEST_ZIP_MAX_MEMBER_MB`  | 256     | MB      | 413 `limit_exceeded`                                                                                        |
+| `zip_max_ratio`      | `ATRIUM_TEXT_INGEST_ZIP_MAX_RATIO`      | 200     | ratio   | 413 `limit_exceeded`                                                                                        |
+| `max_pages`          | `ATRIUM_TEXT_INGEST_MAX_PAGES`          | 20000   | pages   | 413 `limit_exceeded` (`too_large`)                                                                          |
+| `max_lines_per_page` | `ATRIUM_TEXT_INGEST_MAX_LINES_PER_PAGE` | 100000  | lines   | a paged format: 413 `limit_exceeded`; any other: split onto continuation pages, read in full — `split` note |
+| `reader_timeout_s`   | `ATRIUM_TEXT_INGEST_READER_TIMEOUT_S`   | 300     | s       | 422 `limit_exceeded` (`timeout`, PDF reader) — a per-input budget, a retry will not help                    |
+| `max_line_chars`     | `ATRIUM_TEXT_INGEST_MAX_LINE_CHARS`     | 1000    | chars   | wrapped at a word boundary, classified in full as several lines — `split` note                              |
+| `odf_repeat_cap`     | `ATRIUM_TEXT_INGEST_ODF_REPEAT_CAP`     | 100     | repeats | repeated ODS/ODT cells or rows past it are not read — `trimmed` note                                        |
+| `pdf_object_cap`     | `ATRIUM_TEXT_INGEST_PDF_OBJECT_CAP`     | 20000   | objects | the text layer is judged on the first N objects (the text is read in full) — `sampled` note                 |
+| `lr_chunk_size`      | `LR_CHUNK_SIZE`                         | 350     | lines   | an ALTO page is ordered window by window — `split` note                                                     |
+| `lr_min_chunk_size`  | `LR_MIN_CHUNK_SIZE`                     | 50      | lines   | out of memory below it: the page keeps its document order — `skipped` note                                  |
+| `ppl_batch_lines`    | `PPL_BATCH_LINES`                       | 128     | lines   | lines per perplexity pass; a failed batch scores its lines 99999 — `skipped` note                           |
+| `ppl_max_tokens`     | — (derived from `GPT2_MODEL_NAME`)      | —       | tokens  | the perplexity model reads the first N tokens of a line — `trimmed` note (`null` until the model loads)     |
+
+Platform limits (not settings): libxml2's default limits (parsed without `huge_tree`); Starlette's multipart
+defaults.
+
+## Errors
+
+Every error has one JSON body (hub `docs/agent_skill_strategy.md` §4.4, atrium-project#32 item 2):
+`{"status": <int>, "reason": <code or null>, "detail": "<text>"}`. `detail` starts with alto's own reader code
+where there is one (`too_large: …`, `corrupt: …`); a `limit_exceeded` body adds `limit` (`key`, `env`, `value`,
+`observed`, `unit`), and a request-validation 422 adds `errors`.
+
+| Code | `reason`         | When                                                                                                            |
+|------|------------------|-----------------------------------------------------------------------------------------------------------------|
+| 400  | `null`           | a kind of file this service does not read (`binary_content`, `image_needs_ocr`, `legacy_office_unsupported`, …) |
+| 413  | `limit_exceeded` | over `MAX_UPLOAD_MB` or a `[TEXT_INGEST]` size/count limit (`too_large`, `zip_limits_exceeded`)                 |
+| 422  | `limit_exceeded` | the PDF reader's time limit (`timeout`)                                                                         |
+| 422  | `null`           | a supported file that cannot be read (`corrupt`, `encrypted`, `malformed`, `no_text`, …), or request validation |
+| 500  | `null`           | processing failure                                                                                              |
+| 503  | `null`           | the replica is shutting down — retry against a live one                                                         |
+
+```json
+{"status": 413, "reason": "limit_exceeded",
+ "detail": "too_large: 25000 pages > MAX_PAGES=20000 (setting: ATRIUM_TEXT_INGEST_MAX_PAGES, or [TEXT_INGEST] MAX_PAGES in the config)",
+ "limit": {"key": "max_pages", "env": "ATRIUM_TEXT_INGEST_MAX_PAGES", "value": 20000, "observed": null, "unit": "pages"}}
+```
 
 ## Shutdown behavior 🛑
 

@@ -255,7 +255,9 @@ checked against bomb caps before anything is unpacked, and XML with entity decla
 A re-run never leaves stale pages of a document that now fails, and a page directory is only ever
 replaced when it holds nothing but that document's page files. DOCX/ODT footnotes end the page
 that cites them (`[TEXT_INGEST].NOTES`). All caps live in `[TEXT_INGEST]` in
-[config.txt](setup/config.txt) 📎.
+[config.txt](setup/config.txt) 📎; each can also be set as the environment variable
+`ATRIUM_TEXT_INGEST_<KEY>`, which wins over the file (atrium-project#53; the full list is
+[service/README.md § Limits](service/README.md#limits)).
 
 ```
 PAGE_TEXT/
@@ -910,10 +912,11 @@ extension), returning the same per-line classification fields as the batch pipel
 TEI, ABBYY/DjVu XML, Tesseract TSV, Markdown, CSV/TSV, JSONL, SRT/VTT, EML/MBOX, compressed files and ZIP bundles)
 as `task_type` `document`. `auto` keeps `.txt`/`.json` as before and decides `.xml` and every other upload
 **from its bytes**: an uncompressed ALTO root stays on the ALTO path, a file of a kind the service does not read is
-a 400 naming the reason code, and a supported file that cannot be read — a document without a single text line
-included (`no_text`) — is a 422. Document results carry `page`/`page_label` per line and a `pages` summary, and
-are read and shaped by the same `text_formats.py` code and the same `[TEXT_INGEST]` settings as the batch method;
-a `.txt` upload is decoded the same way (any common encoding, cp1250 first).
+a 400 naming the reason code, a supported file that cannot be read — a document without a single text line
+included (`no_text`) — is a 422, and one over a `[TEXT_INGEST]` size or count cap is a 413 `limit_exceeded`.
+Document results carry `page`/`page_label` per line and a `pages` summary, and are read and shaped by the same
+`text_formats.py` code and the same `[TEXT_INGEST]` settings as the batch method; a `.txt` upload
+is decoded the same way (any common encoding, cp1250 first).
 
 The batch pipeline and the API service share the same `text_util_langID` categorization engine and `config.txt`
 settings — including the default **Qwen2.5-0.5B** 🤖 perplexity model — to ensure zero drift between local processing
