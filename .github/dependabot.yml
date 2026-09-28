@@ -41,6 +41,13 @@ updates:
       # (issue atrium-project#10)
       - dependency-name: "numpy"
         versions: [">= 2.5.0"]
+      # Pinned exactly here (requirements-test.txt) and in service/requirements.txt: the
+      # committed service/openapi.json is a function of both (atrium-project#32 round 2). Bump
+      # them together by hand and regenerate the spec in the same commit
+      # (python atrium_openapi.py export --app service.text_api:app), so the release's
+      # breaking-change check sees what the upgrade changes.
+      - dependency-name: "fastapi"
+      - dependency-name: "pydantic"
 
   # FastAPI service layer.
   - package-ecosystem: "pip"
@@ -69,3 +76,6 @@ updates:
       # (issue atrium-project#10)
       - dependency-name: "numpy"
         versions: [">= 2.5.0"]
+      # Pinned exactly: see the /setup entry above (atrium-project#32 round 2).
+      - dependency-name: "fastapi"
+      - dependency-name: "pydantic"

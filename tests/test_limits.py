@@ -20,20 +20,39 @@ from atrium_limits import LimitNotes
 from tests.text_format_fixtures import make_zip, odf_bytes
 
 
+def _clear_ingest_settings():
+    """Reset the cached [TEXT_INGEST] settings of BOTH loaded copies of text_inference.
+
+    service/text_api.py imports the bare `text_inference` (its sys.path bootstrap), while
+    these tests import `service.text_inference`: two module objects, each with its own
+    lru_cache. Clearing only the second left the cache /process reads untouched, so a test
+    that posted through the app after any earlier /process call had filled it (a sniffed
+    upload is enough) ran with that call's limits. Nothing ran first until the conformance
+    tests of atrium-project#32 round 2, which sort before this file.
+    """
+    import sys
+
+    import service.text_inference  # noqa: F401  (loaded, so the loop below always finds it)
+
+    for name in ("text_inference", "service.text_inference"):
+        module = sys.modules.get(name)
+        if module is not None:
+            module.ingest_settings.cache_clear()
+
+
 @pytest.fixture
 def ingest_config(tmp_path, monkeypatch):
     """Point LANGID_CONFIG at a scratch config and reset the cached settings around the test."""
-    import service.text_inference as ti
 
     def write(text):
         path = tmp_path / "config.txt"
         path.write_text(text, encoding="utf-8")
         monkeypatch.setenv("LANGID_CONFIG", str(path))
-        ti.ingest_settings.cache_clear()
+        _clear_ingest_settings()
 
-    ti.ingest_settings.cache_clear()
+    _clear_ingest_settings()
     yield write
-    ti.ingest_settings.cache_clear()
+    _clear_ingest_settings()
 
 
 # ── [TEXT_INGEST]: environment → config file → default ──────────────────────────────────

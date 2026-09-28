@@ -28,6 +28,7 @@ Two frontend variants are included: a **standalone** interface (`frontend/`) and
 * [Configuration (environment) ⚙️](#configuration-environment-)
 * [Limits 📏](#limits)
 * [Errors 🚨](#errors)
+* [OpenAPI (the typed contract) 📜](#openapi-the-typed-contract)
 * [Contacts 📧](#contacts-)
 * [Acknowledgements 🙏](#acknowledgements-)
 
@@ -153,9 +154,18 @@ are assigned by a fast CPU pre-filter before any model inference. The remaining 
   CSV/TSV, JSON Lines.
 * `task_type`: `alto`, `text`, `json`, `document`, or `auto` (default). `auto` maps `.txt`→`text` and
   `.json`→`json` by extension; `.xml` and every other upload are decided **from the bytes** — an ALTO root →
-  `alto`, anything else readable → `document`. An unsupported file (image, legacy `.doc`, other binary) is a
-  `400` naming the reason code; a document over a [limit](#limits) is a `413` (`422` for the reader's time
-  limit) with `reason: "limit_exceeded"`; an unreadable document (encrypted, corrupt, no text) is a `422`.
+  `alto`, anything else readable → `document`. Any other value is a `422` (atrium-project#32 round 2; it used
+  to be read as `text`). An unsupported file (image, legacy `.doc`, other binary) is a `415`
+  `unsupported_media_type` naming the reader's code (a `400` before round 2); a document over a
+  [limit](#limits) is a `413` (`422` for the reader's time limit) with `reason: "limit_exceeded"`; an
+  unreadable document (encrypted, corrupt, no text) or a JSON upload that does not parse is a `422`. See
+  [Errors](#errors).
+* `document_json` (optional): a baseline ATRIUM document record, or an AMČR seed (`doc_id`, `source`). The
+  response then carries `document_json`: the record with this tool's `pages`/`lines` fields merged in. A
+  record that cannot be opened (not JSON, not an object, a newer `schema_version` major) is a `422`
+  `invalid_record`; an empty part counts as none.
+* `document_record` (optional, **deprecated**): the earlier name of `document_json`; its record comes back as
+  `document_json_out`. Both names keep working; send one of them, not both (`422`).
 
 Every response carries `limits_applied`: the limits that shaped the result without refusing it (see
 [Limits](#limits)), `[]` when none did.
@@ -184,9 +194,11 @@ A `document` result also carries `format` (the detected kind), `origin` (the tru
 a `pages` list (`page`, `page_label`, `lines`, PDF `text_layer` / `needs_ocr_reason`), and `page` /
 `page_label` on every line, whose `line_num` restarts per page as in the batch `DOC_LINE_CATEG`. Lines are read
 and shaped by the same `text_formats.py` code as the batch text-lines method (blank lines dropped, lines over
-1000 characters wrapped). With `document_record`, lines accrete per page — except for born-digital uploads
-(DOCX, visible-text PDF, …), whose record belongs to llm-enrich's `digital-convert` (atrium_document §1a).
-Each item in `cleaned_lines` carries the fields used by the classification pipeline.
+1000 characters wrapped). With a record (`document_json`), lines accrete per page — except for born-digital
+uploads (DOCX, visible-text PDF, …), whose record belongs to llm-enrich's `digital-convert` (atrium_document
+§1a) and comes back as it was sent. Each item in `cleaned_lines` carries the fields used by the
+classification pipeline. Every field is typed in [`openapi.json`](openapi.json) (`ProcessResponse`,
+`AltoLine`, `AltoPage`); the table below is the short form.
 
 ```json
 {
@@ -480,20 +492,50 @@ Every error has one JSON body (hub `docs/agent_skill_strategy.md` §4.4, atrium-
 where there is one (`too_large: …`, `corrupt: …`); a `limit_exceeded` body adds `limit` (`key`, `env`, `value`,
 `observed`, `unit`), and a request-validation 422 adds `errors`.
 
-| Code | `reason`         | When                                                                                                            |
-|------|------------------|-----------------------------------------------------------------------------------------------------------------|
-| 400  | `null`           | a kind of file this service does not read (`binary_content`, `image_needs_ocr`, `legacy_office_unsupported`, …) |
-| 413  | `limit_exceeded` | over `MAX_UPLOAD_MB` or a `[TEXT_INGEST]` size/count limit (`too_large`, `zip_limits_exceeded`)                 |
-| 422  | `limit_exceeded` | the PDF reader's time limit (`timeout`)                                                                         |
-| 422  | `null`           | a supported file that cannot be read (`corrupt`, `encrypted`, `malformed`, `no_text`, …), or request validation |
-| 500  | `null`           | processing failure                                                                                              |
-| 503  | `null`           | the replica is shutting down — retry against a live one                                                         |
+Since atrium-project#32 round 2 a reader refusal also carries the reader's code as `cause` (informational,
+not registered: it may change; `reason` is the stable one), and a `415` lists the extensions the readers take
+as `accepted`.
+
+| Code | `reason`                 | When                                                                                                                                                                           |
+|------|--------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 413  | `limit_exceeded`         | over `MAX_UPLOAD_MB` or a `[TEXT_INGEST]` size/count limit (`too_large`, `zip_limits_exceeded`)                                                                                |
+| 415  | `unsupported_media_type` | a kind of file this service does not read (`binary_content`, `image_needs_ocr`, `legacy_office_unsupported`, `archive_unsupported`); a 400 before round 2                      |
+| 422  | `invalid_record`         | the `document_json` / `document_record` part cannot be opened (not UTF-8 JSON, not an object, a newer `schema_version` major)                                                  |
+| 422  | `limit_exceeded`         | the PDF reader's time limit (`timeout`)                                                                                                                                        |
+| 422  | `null`                   | a supported file that cannot be read (`corrupt`, `encrypted`, `malformed`, `no_text`, …), a JSON upload that does not parse, or request validation (an unknown `task_type`, …) |
+| 500  | `null`                   | processing failure                                                                                                                                                             |
+| 501  | `null`                   | this deployment lacks a reader's optional dependency (`dependency_missing`: pypdfium2, lxml); a 400 before round 2                                                             |
+| 503  | `null`                   | the replica is shutting down — retry against a live one                                                                                                                        |
 
 ```json
 {"status": 413, "reason": "limit_exceeded",
  "detail": "too_large: 25000 pages > MAX_PAGES=20000 (setting: ATRIUM_TEXT_INGEST_MAX_PAGES, or [TEXT_INGEST] MAX_PAGES in the config)",
  "limit": {"key": "max_pages", "env": "ATRIUM_TEXT_INGEST_MAX_PAGES", "value": 20000, "observed": null, "unit": "pages"}}
 ```
+
+## OpenAPI (the typed contract)
+
+The service's OpenAPI document is committed as [`service/openapi.json`](openapi.json) and
+attached to every release as `openapi.json` with its `openapi.json.sha256` (atrium-project#32
+round 2). It is what a client is generated from: every request and response field is typed,
+every error response is the `ErrorBody` above, the registered `reason` codes are listed in
+`x-atrium-reason-codes`, and a returned record is typed by the vendored record schema
+(`AtriumDocument`). `GET /info` reports `openapi_sha256`, the digest of the spec the running
+image serves — equal to the release's `openapi.json.sha256` for an image built from that tag.
+`document_record` and `document_json_out` are marked `deprecated` there.
+
+- **After an API change**, regenerate and commit it:
+  `python atrium_openapi.py export --app service.text_api:app --out service/openapi.json`.
+  `tests/test_openapi_contract.py` fails while it is stale.
+- **Compatibility.** Each release compares its spec with the previous release's
+  (`release.yml`, `atrium_openapi.py compare` with oasdiff): a breaking change fails the
+  release unless the major version went up (for 0.x, that means 1.0), and a removed reason
+  code always fails. New fields, endpoints and reason codes are additive.
+- **fastapi and pydantic are pinned** exactly (`service/requirements.txt`,
+  `setup/requirements-test.txt`): the spec is generated by them. Bump both by hand and regenerate.
+- **Tests.** `tests/test_api_contract.py` drives `/process` with canned model results and holds every
+  response — 200s and refusals — to the published schema; `tests/test_openapi_contract.py` (vendored from
+  the hub) checks the committed spec itself.
 
 ## Shutdown behavior 🛑
 

@@ -5,7 +5,14 @@
 # python-multipart were previously unpinned entirely, so an API-only install
 # resolved to whatever the index served that day and could differ from the
 # batch pipeline's own resolution for the same package.
-fastapi>=0.141.1,<1.0
+# fastapi and pydantic are pinned EXACTLY (atrium-project#32 round 2): the committed
+# service/openapi.json — the spec every release attaches, and AMČR generates its clients
+# from — is a function of both, and tests/test_openapi_contract.py fails when the installed
+# versions differ from these pins. Bump them together by hand, in setup/requirements-test.txt
+# too, and regenerate the spec in the same commit
+# (python atrium_openapi.py export --app service.text_api:app); dependabot ignores both.
+fastapi==0.141.1
+pydantic==2.13.5
 uvicorn>=0.53.0,<1.0
 python-multipart>=0.0.32
 # (atrium-project#10 D4) /process accretes into a document record through

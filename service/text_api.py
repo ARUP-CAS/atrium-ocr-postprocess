@@ -1,6 +1,17 @@
 """
 service/text_api.py
 FastAPI wrapper for the ATRIUM text processing service.
+
+The typed contract (atrium-project#32 round 2). Every route declares its response model
+and its error statuses, so the committed ``service/openapi.json`` — attached to every
+release, and what the AMČR pipeline generates its clients from — types every field. The
+models below DOCUMENT the responses (``response_model=None``): the bytes sent are what the
+handlers build, and ``tests/test_api_contract.py`` validates real responses against the
+published schema. Refusals carry registered reasons: a file of a kind this service does not
+read is 415 ``unsupported_media_type`` (the reader's own code in ``cause``), a record that
+cannot be opened is 422 ``invalid_record``. Regenerate the spec after an API change::
+
+    python atrium_openapi.py export --app service.text_api:app --out service/openapi.json
 """
 
 import asyncio
@@ -13,11 +24,12 @@ import tempfile
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ConfigDict, Field
 
 # Put BOTH the repo root and this file's own directory on sys.path BEFORE any
 # first-party import, so every launch context resolves:
@@ -50,13 +62,21 @@ for _bootstrap_path in (_repo_root, _current_dir):
 # `atrium_service` is the shared ATRIUM meta-contract helper (§4), byte-identical
 # across every service and enforced by para-drift.reusable.yml.
 from atrium_service import (  # noqa: E402
+    AtriumDocument,
     AtriumHTTPError,
+    CreateAction,
+    InfoBase,
+    LimitNote,
     ServiceState,
     add_cors,
     attach_error_handlers,
     attach_health,
     attach_inflight_middleware,
+    attach_openapi_contract,
     build_info,
+    error_responses,
+    operation_id,
+    parse_record_part,
     read_tool_version,
     read_upload_bounded,
     serve_lifecycle,
@@ -78,7 +98,7 @@ from atrium_document import canonical_doc_id, resolve_originator  # noqa: E402
 from atrium_limits import LimitExceeded, LimitNotes  # noqa: E402
 from atrium_paradata import ParadataLogger  # noqa: E402
 from document_hook import PROGRAM_NAME, quality_band, write_document_block  # noqa: E402
-from text_formats import READERS, IngestError, compression_of, sniff_kind  # noqa: E402
+from text_formats import COMPRESSION_SUFFIXES, READERS, IngestError, compression_of, sniff_kind  # noqa: E402
 from tool_limits import (  # noqa: E402
     LIMITS,
     MAX_FILE_MB,
@@ -94,6 +114,9 @@ from tool_limits import (  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+#: The tool id (/info `service`, the spec's `x-atrium-service`): the repository name.
+SERVICE = "atrium-alto-postprocess"
+
 # Every limit this service has is declared in tool_limits.py (atrium-project#53, factor III)
 # and read per request. These are the import-time values, kept for the callers and tests
 # that import them.
@@ -104,14 +127,28 @@ MAX_UPLOAD_BYTES = int(MAX_UPLOAD_MB * 1024 * 1024)
 #: Readiness/draining/in-flight state for the §4.6 disposability contract (issue #55).
 _state = ServiceState()
 
-#: (#31 Phase 4) Reason codes that mean "this service does not read this kind of
-#: file" — a 400, and a retry will not help. The limit codes below are refusals of a
-#: supported file that is over a [TEXT_INGEST] limit. Every other code (corrupt,
-#: encrypted, malformed, no_text, ...) means the file is of a supported kind but
-#: unreadable — a 422. One mapping for every path, sniffed or explicit.
+#: (#31 Phase 4) Reader codes that mean "this service does not read this kind of
+#: file", and a retry will not help. Since atrium-project#32 round 2 they answer 415 with
+#: the registered `reason: "unsupported_media_type"` (a 400 with `reason: null` before, which
+#: no other ATRIUM service sent for a media type); the reader's code stays at the start of
+#: `detail` and is also the body's `cause`. The limit codes below are refusals of a
+#: supported file that is over a [TEXT_INGEST] limit. `dependency_missing` is this
+#: deployment's shortcoming, not the file's: a 501 (see DEPENDENCY_REASONS). Every other
+#: code (corrupt, encrypted, malformed, no_text, ...) means the file is of a supported kind
+#: but unreadable — a 422. One mapping for every path, sniffed or explicit.
 UNSUPPORTED_REASONS = frozenset(
-    {"binary_content", "legacy_office_unsupported", "image_needs_ocr", "archive_unsupported", "dependency_missing"}
+    {"binary_content", "legacy_office_unsupported", "image_needs_ocr", "archive_unsupported"}
 )
+
+#: (atrium-project#32 round 2) A reader's optional dependency (pypdfium2, lxml) is not
+#: installed in this image: HTTP 501, `reason: null`, `cause: "dependency_missing"`. It was
+#: one of the 400s above, which told the caller its file was the problem.
+DEPENDENCY_REASONS = frozenset({"dependency_missing"})
+
+#: What a 415 lists as `accepted` (§4.4): every file extension a reader is registered for,
+#: and the single-file compression wrappers they may come in. The kind is decided from the
+#: bytes, so this is the list of names a client can expect to work, not a filter.
+ACCEPTED_EXTENSIONS = sorted({ext for spec in READERS.values() for ext in spec.extensions} | set(COMPRESSION_SUFFIXES))
 
 #: (atrium-project#53) The reader codes that mean "over a limit". They answer with the
 #: harmonised `reason: "limit_exceeded"` and the status the limit's cause calls for: 413
@@ -138,7 +175,14 @@ _INGEST_LIMIT_NAME = re.compile(r"\b(" + "|".join(sorted(_INGEST_LIMITS, key=len
 
 
 def _ingest_http_error(exc: IngestError, *, sniffing: bool = False) -> Exception:
-    """The HTTP error for a reader failure: 400 unsupported, 413/422 ``limit_exceeded``, else 422."""
+    """The HTTP error for a reader failure (§4.4).
+
+    415 ``unsupported_media_type`` for a kind this service does not read, 501 for a missing
+    reader dependency, 413/422 ``limit_exceeded`` for a limit, else 422. Every one but a
+    named limit (an ``atrium_limits.LimitExceeded``, whose body names the limit in ``limit``)
+    carries the reader's code as ``cause`` (unregistered: informational, it may change), and
+    ``detail`` starts with it as it always did.
+    """
     detail = f"{exc.code}: {exc.message}"
     if exc.code in LIMIT_REASONS:
         match = _INGEST_LIMIT_NAME.search(exc.message)
@@ -154,13 +198,19 @@ def _ingest_http_error(exc: IngestError, *, sniffing: bool = False) -> Exception
                 detail=f"{detail} (setting: {spec.env}, or [TEXT_INGEST] {match.group(1)} in the config)",
             )
         # A limit the reader did not name (an RTF over any cap, out of memory while reading).
-        return AtriumHTTPError(422 if exc.code == "timeout" else 413, detail, reason="limit_exceeded")
-    status = 400 if exc.code in UNSUPPORTED_REASONS else 422
-    if sniffing and status == 400:
-        detail = (
-            f"Cannot auto-detect a supported file type ({detail}). Set task_type='alto', 'text', 'json' or 'document'."
+        return AtriumHTTPError(422 if exc.code == "timeout" else 413, detail, reason="limit_exceeded", cause=exc.code)
+    if exc.code in DEPENDENCY_REASONS:
+        return AtriumHTTPError(501, detail, cause=exc.code)
+    if exc.code in UNSUPPORTED_REASONS:
+        if sniffing:
+            detail = (
+                f"Cannot auto-detect a supported file type ({detail}). "
+                "Set task_type='alto', 'text', 'json' or 'document'."
+            )
+        return AtriumHTTPError(
+            415, detail, reason="unsupported_media_type", cause=exc.code, accepted=ACCEPTED_EXTENSIONS
         )
-    return HTTPException(status_code=status, detail=detail)
+    return AtriumHTTPError(422, detail, cause=exc.code)
 
 
 #: At most this many UTF-8 bytes of the client's file name go into the temporary file's
@@ -175,6 +225,113 @@ def _temp_suffix(filename: str) -> str:
     base = Path(filename.replace("\\", "/")).name
     tail = base.encode("utf-8")[-_MAX_SUFFIX_BYTES:].decode("utf-8", errors="ignore")
     return f"_{tail}" if tail not in ("", ".", "..") else ""
+
+
+# ── the typed contract (atrium-project#32 round 2) ──────────────────────────────────────────
+# These models document the responses the handlers build; they do not filter them. A field
+# the handlers always send has no default (required); one they send only sometimes defaults
+# to None. Descriptions are published in service/openapi.json, so they are written for the
+# client. Values such as `type` and `category` are open strings: a new value must never break
+# a client generated from an older spec.
+
+#: `task_type` of /process. `auto` decides by the name (`.txt` → text, `.json` → json) and
+#: otherwise by the bytes. Any other value is refused (422); it used to be read as `text`.
+TaskType = Literal["auto", "alto", "text", "json", "document"]
+
+
+class AltoLine(BaseModel):
+    """One classified line (`cleaned_lines[]`)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    line_num: int = Field(description="1-based position after layout reordering; per page for a document.")
+    text: str = Field(description="The cleaned text, with split-word merges applied.")
+    lang: str = Field(
+        description="The language code after the expected-language remap (FastText, then setup/config.txt)."
+    )
+    lang_score: float = Field(description="Its confidence, from 0 to 1.")
+    original_lang: str = Field(description="FastText's own prediction, before the remap.")
+    orig_lang_score: float = Field(description="FastText's own confidence, from 0 to 1.")
+    perplexity: float = Field(description="Qwen2.5-0.5B perplexity; 99999 when the line's batch could not be scored.")
+    garbage_density: float = Field(description="The share of non-alphanumeric noise characters.")
+    sym_count: int = Field(description="Tokens with strange or unexpected symbols.")
+    upper_count: int = Field(description="Tokens with mid-word uppercase artefacts.")
+    repeated_count: int = Field(description="Tokens with a non-standard character repetition.")
+    ldl_fuses: int = Field(description="Tokens with letter-digit-letter fusions.")
+    gibberish: int = Field(description="Tokens lacking vowels or with highly irregular ratios.")
+    word_weird: float = Field(description="The mean per-word weirdness score, from 0 to 1.")
+    quality_score: float = Field(description="The composite quality score, from 0 to 1.")
+    category: str = Field(
+        description="`Clear`, `Noisy`, `Trash`, `Non-text` or `Empty`; written to the record as `lines[].categ`."
+    )
+    page: Optional[str] = Field(None, description="Document uploads only: the page, as its 1-based index.")
+    page_label: Optional[str] = Field(None, description="Document uploads only: the source's own page label.")
+
+
+class AltoPage(BaseModel):
+    """One page of a document upload (`pages[]`)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    page: str = Field(description="The page, as its 1-based index (the `page` of its lines).")
+    page_label: Optional[str] = Field(description="The source's own page label; empty when it has none.")
+    lines: int = Field(description="How many classified lines the page has.")
+    text_layer: Optional[str] = Field(description="PDF only: `none`, `garbled`, `ocr` or `digital`; else null.")
+    needs_ocr_reason: Optional[str] = Field(description="Why the page needs OCR; null when it does not.")
+
+
+class ProcessResponse(BaseModel):
+    """The classified lines of one upload, and its record when one was sent."""
+
+    model_config = ConfigDict(extra="allow")
+
+    type: str = Field(description="What the upload was read as: `alto_xml`, `plain_text`, `json` or `document`.")
+    filename: str = Field(description="The upload's name, as sent.")
+    cleaned_lines: List[AltoLine] = Field(description="The classified lines, in reading order.")
+    limits_applied: List[LimitNote] = Field(description="Every limit that shaped the result without refusing it.")
+    format: Optional[str] = Field(None, description="Document uploads only: the reader's kind (`pdf`, `docx`, ...).")
+    media_type: Optional[str] = Field(None, description="Document uploads only: the media type of that kind.")
+    origin: Optional[str] = Field(None, description="Document uploads only: the `source.origin` the record gets.")
+    pages: Optional[List[AltoPage]] = Field(None, description="Document uploads only: one entry per page.")
+    document_json: Optional[AtriumDocument] = Field(
+        None,
+        description=(
+            "Only when the record was sent as `document_json`: the record with alto-postprocess's `pages` and "
+            "`lines` fields merged in. A born-digital record (atrium_document §1a) comes back as it was sent."
+        ),
+    )
+    document_json_out: Optional[AtriumDocument] = Field(
+        None,
+        deprecated=True,
+        description=(
+            "Deprecated: the same record, returned under this name when it was sent as `document_record`. "
+            "Send `document_json` and read `document_json`, as every ATRIUM service does."
+        ),
+    )
+    paradata: Optional[CreateAction] = Field(
+        None,
+        description="The run's provenance (atrium-project#67 R2). Not returned yet: always absent.",
+    )
+
+
+class AltoInfo(InfoBase):
+    """`/info` of atrium-alto-postprocess."""
+
+    status: str = Field(description="`active`.")
+    device: str = Field(description="Where the models run: `cpu` or `cuda`.")
+    supported_formats: List[str] = Field(description="The kinds of file `/process` reads.")
+    quality_categories: List[str] = Field(description="The `category` values a line can get.")
+    line_fields: List[str] = Field(description="The fields of a classified line.")
+
+
+#: What the record parts' description says they are.
+_RECORD_PART_HELP = (
+    "Optional baseline ATRIUM Document JSON (accretion model, docs/document_schema.md), or an AMČR seed "
+    "(`doc_id`, `source`). When given, the response's `document_json` carries the record back with "
+    "alto-postprocess's `pages` and `lines` fields merged in; every other tool's block and field passes "
+    "through. A record that does not validate against atrium_document.schema.json is still accepted "
+    "(rule 6); one that cannot be opened is refused (422 `invalid_record`). An empty part counts as none."
+)
 
 
 @asynccontextmanager
@@ -209,10 +366,18 @@ app = FastAPI(
     title="ATRIUM Text Processor",
     version=read_tool_version(Path(__file__).resolve().parent),
     lifespan=lifespan,
+    # The typed contract (atrium-project#32 round 2): every route documents the §4.4 error
+    # body for 422 and 500 (and FastAPI's own 422 body, which is not what is sent, goes);
+    # operationIds are the handler names; the spec never depends on a root_path.
+    responses=error_responses(422, 500),
+    generate_unique_id_function=operation_id,
+    root_path_in_servers=False,
 )
 attach_inflight_middleware(app, _state)
 # §4.4 error body {status, reason, detail} for every error (atrium-project#32 item 2, #53).
 attach_error_handlers(app)
+# The published spec: reason registry, record schema, service id (atrium-project#32 item 3).
+attach_openapi_contract(app, SERVICE)
 
 # CORS — standard §4.5 configuration; default "*" for parity with sibling services.
 add_cors(app, methods=["GET", "POST"])
@@ -424,11 +589,15 @@ async def root() -> Union[HTMLResponse, Dict[str, str]]:
     return {"message": "Service running. Frontend not found."}
 
 
-@app.get("/info")
+@app.get(
+    "/info",
+    response_model=None,
+    responses={200: {"model": AltoInfo, "description": "Identity, limits, capabilities."}},
+)
 async def info() -> Dict[str, Any]:
     return build_info(
         app,
-        service="atrium-alto-postprocess",
+        service=SERVICE,
         limits=LIMITS,
         status="active",
         device=text_manager.device,
@@ -458,11 +627,41 @@ async def info() -> Dict[str, Any]:
     )
 
 
-@app.post("/process")
+@app.post(
+    "/process",
+    response_model=None,
+    responses={
+        200: {"model": ProcessResponse, "description": "The classified lines, and the record when one was sent."},
+        **error_responses(413, 415, 501, 503),
+    },
+)
 async def process_document(
-    file: UploadFile = File(...),
-    task_type: str = Form("auto"),
-    document_record: UploadFile = File(None),  # Added optional input
+    file: UploadFile = File(
+        ...,
+        description=(
+            "The page or document: ALTO XML, plain text, generic JSON, or any other text-bearing file "
+            "(PDF, DOCX, ODT, XLSX, PPTX, EPUB, RTF, HTML/hOCR, PAGE XML, TEI, Markdown, CSV/TSV, ...)."
+        ),
+    ),
+    task_type: TaskType = Form(
+        "auto",
+        description=(
+            "How to read the upload: `alto`, `text`, `json`, `document` (any other supported kind), or `auto` "
+            "(`.txt` → text, `.json` → json, anything else decided from the bytes)."
+        ),
+    ),
+    document_json: UploadFile = File(
+        None, description=_RECORD_PART_HELP, json_schema_extra={"contentMediaType": "application/json"}
+    ),
+    document_record: UploadFile = File(
+        None,
+        deprecated=True,
+        description=(
+            "Deprecated name of `document_json`; its record comes back as `document_json_out`. Send one of "
+            "the two, not both."
+        ),
+        json_schema_extra={"contentMediaType": "application/json"},
+    ),
 ) -> JSONResponse:
     """
     Upload an ALTO XML, plain-text or generic JSON file — or (#31) any other text-bearing
@@ -474,12 +673,19 @@ async def process_document(
     document). Document results carry `page`/`page_label` per line and a `pages`
     summary. The readers use the config's [TEXT_INGEST] settings.
 
-    Errors name the reason code: 400 for a file of a kind this service does not read
-    (binary_content, legacy_office_unsupported, image_needs_ocr, archive_unsupported,
-    dependency_missing), 413 `limit_exceeded` for a file over a size or count limit
-    (too_large, zip_limits_exceeded; 422 for the reader's time limit, timeout), 422 for a
-    supported kind that cannot be read (corrupt, encrypted, malformed, no_text, ...).
+    Errors name the reader's code at the start of `detail` and, but for a named limit, as
+    `cause`: 415 `unsupported_media_type` for a file of a kind this service does not read
+    (binary_content, legacy_office_unsupported, image_needs_ocr, archive_unsupported), with
+    the readable extensions as `accepted`; 413 `limit_exceeded` for a file over a size or
+    count limit (too_large, zip_limits_exceeded; 422 for the reader's time limit, timeout);
+    422 for a supported kind that cannot be read (corrupt, encrypted, malformed, no_text,
+    ...); 501 when this deployment lacks the reader's optional dependency
+    (dependency_missing). A record part that cannot be opened is 422 `invalid_record`.
     Every response carries `limits_applied` (atrium-project#53).
+
+    The record goes in `document_json` and comes back in `document_json`, as with every
+    other ATRIUM service (atrium-project#32 round 2). The earlier names — `document_record`
+    in, `document_json_out` out — still work and are deprecated in the spec.
 
     Returns a list of classified lines.  Each entry carries:
 
@@ -525,7 +731,8 @@ async def process_document(
         else:
             # (#31) .xml and every other extension: decided from the uploaded bytes
             # below (an ALTO root stays on the ALTO path; anything else readable is a
-            # "document"); an unsupported file is still a 400.
+            # "document"); an unsupported file is a 415 (a 400 before atrium-project#32
+            # round 2). `sniff` is internal: the TaskType a client may send excludes it.
             task_type = "sniff"
 
     _refuse_if_draining()
@@ -542,6 +749,32 @@ async def process_document(
     # than copied to disk whole and measured afterwards (atrium-project#53).
     upload_mb = MAX_UPLOAD.get()
     content = await read_upload_bounded(file, upload_mb, "File")
+
+    # The record, read before any model runs so a record that cannot be opened is refused
+    # up front (422 `invalid_record`, atrium-project#32 round 2); it used to reach the
+    # catch-all below as a 500 "Processing failed" after the whole upload was classified.
+    # Bounded like the file (atrium-project#53). An empty part counts as none. It is
+    # accepted under two names: `document_json` (every ATRIUM service's) comes back as
+    # `document_json`; the deprecated `document_record` comes back as `document_json_out`,
+    # as it always did.
+    record_bytes: Optional[bytes] = None
+    record_key = "document_json"
+    for part, label, key in (
+        (document_json, "document_json", "document_json"),
+        (document_record, "document_record", "document_json_out"),
+    ):
+        if part is None:
+            continue
+        raw = await read_upload_bounded(part, upload_mb, label)
+        if parse_record_part(raw, label) is None:
+            continue
+        if record_bytes is not None:
+            raise HTTPException(
+                status_code=422,
+                detail="Send the record as `document_json` or as `document_record` (deprecated), not both.",
+            )
+        record_bytes, record_key = raw, key
+
     with tempfile.NamedTemporaryFile(delete=False, suffix=_temp_suffix(file.filename)) as tmp:
         tmp.write(content)
         tmp_path = tmp.name
@@ -569,7 +802,19 @@ async def process_document(
         if task_type == "alto":
             result = await asyncio.to_thread(text_manager.process_alto, tmp_path, notes=notes)
         elif task_type == "json":
-            result = await asyncio.to_thread(text_manager.process_json, tmp_path, notes=notes)
+            # A JSON upload that does not decode or parse is the caller's input, not our
+            # failure: a 422 with the reader codes the other paths use (it was the catch-all
+            # 500 before atrium-project#32 round 2).
+            try:
+                result = await asyncio.to_thread(text_manager.process_json, tmp_path, notes=notes)
+            except UnicodeDecodeError as exc:
+                raise AtriumHTTPError(
+                    422, f"decode_failed: the JSON upload is not UTF-8 ({exc}).", cause="decode_failed"
+                ) from exc
+            except json.JSONDecodeError as exc:
+                raise AtriumHTTPError(
+                    422, f"malformed: the JSON upload does not parse ({exc}).", cause="malformed"
+                ) from exc
         elif task_type == "document":
             try:
                 result = await asyncio.to_thread(text_manager.process_document, tmp_path, notes=notes)
@@ -585,14 +830,13 @@ async def process_document(
         result["limits_applied"] = notes.as_list()
 
         # --- Paradata Pair Accretion Hook ---
-        if document_record:
+        if record_bytes is not None:
             with tempfile.TemporaryDirectory() as doc_tmp_dir:
                 baseline_path = os.path.join(doc_tmp_dir, f"{doc_id}.document.json")
 
-                # Save the uploaded baseline JSON — bounded like the file (atrium-project#53):
-                # it used to be copied whole, with no limit at all.
+                # Save the uploaded baseline JSON as it was sent (read and opened above).
                 with open(baseline_path, "wb") as bf:
-                    bf.write(await read_upload_bounded(document_record, upload_mb, "document_record"))
+                    bf.write(record_bytes)
 
                 # (#10 J1) Real lines + real per-page rows, both derived from this
                 # request — see _accretion_records for what was fabricated before.
@@ -614,8 +858,10 @@ async def process_document(
                 # Read back the record from the path the hook wrote (atrium-project#68), not
                 # from a name re-derived here. With nothing written (a foreign-origin record,
                 # say) the uploaded baseline goes back unchanged.
-                with open(record_path or baseline_path, "r", encoding="utf-8") as bf:
-                    result["document_json_out"] = json.load(bf)
+                # utf-8-sig: a baseline returned unchanged may start with the BOM
+                # parse_record_part accepted.
+                with open(record_path or baseline_path, "r", encoding="utf-8-sig") as bf:
+                    result[record_key] = json.load(bf)
         # ------------------------------------
 
         para_logger.note_limits(notes)

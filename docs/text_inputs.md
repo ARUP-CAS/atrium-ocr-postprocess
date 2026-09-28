@@ -408,22 +408,26 @@ The HTTP column is the status the service answers with (§7). Every error body i
 `{"status", "reason", "detail"}` with `detail` starting with the code; the limit codes answer with
 `reason: "limit_exceeded"` and a `limit` member naming the setting (atrium-project#53 — `too_large` and
 `zip_limits_exceeded` were 422 before; they are refusals of an input over a limit, so 413 now).
+Since atrium-project#32 round 2 the four "not a kind this service reads" codes answer 415 with the
+registered `reason: "unsupported_media_type"` (400 with `reason: null` before) and an `accepted` list,
+`dependency_missing` answers 501 (the deployment's gap, not the file's; a 400 before), and every refusal
+but a named limit also carries its code as `cause`.
 
 | Code                                  | Meaning                                                                                                                          | HTTP |
 |---------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|------|
 | `empty_file`                          | zero bytes (also an empty compressed stream)                                                                                     | 422  |
 | `too_large`                           | a size/page/line cap was exceeded                                                                                                | 413  |
-| `binary_content`                      | not text and not a supported container                                                                                           | 400  |
-| `legacy_office_unsupported`           | OLE2 `.doc/.xls/.ppt`; save it as DOCX/XLSX/PPTX                                                                                 | 400  |
-| `image_needs_ocr`                     | an image (or a ZIP of images); run OCR first and feed its output (ALTO, PAGE XML, hOCR, Tesseract TSV, TXT)                      | 400  |
-| `archive_unsupported`                 | an archive this repo does not read: tar, 7z, RAR, zstd, a ZIP without page files, a container inside a compressed file or bundle | 400  |
+| `binary_content`                      | not text and not a supported container                                                                                           | 415  |
+| `legacy_office_unsupported`           | OLE2 `.doc/.xls/.ppt`; save it as DOCX/XLSX/PPTX                                                                                 | 415  |
+| `image_needs_ocr`                     | an image (or a ZIP of images); run OCR first and feed its output (ALTO, PAGE XML, hOCR, Tesseract TSV, TXT)                      | 415  |
+| `archive_unsupported`                 | an archive this repo does not read: tar, 7z, RAR, zstd, a ZIP without page files, a container inside a compressed file or bundle | 415  |
 | `zip_limits_exceeded`                 | ZIP or decompression caps above                                                                                                  | 413  |
 | `xml_entity_declaration`              | XML with `<!ENTITY>`                                                                                                             | 422  |
 | `malformed`                           | broken for its format (bad JSON, unparseable XML/CSV, too deeply nested)                                                         | 422  |
 | `corrupt`                             | the container or compressed stream could not be opened                                                                           | 422  |
 | `encrypted`                           | password- or DRM-protected                                                                                                       | 422  |
 | `timeout` / `reader_crashed`          | the isolated PDF reader hung or died (`timeout` with `reason: "limit_exceeded"`: `READER_TIMEOUT_S`)                             | 422  |
-| `dependency_missing`                  | `pypdfium2` (PDF) or `lxml` not installed                                                                                        | 400  |
+| `dependency_missing`                  | `pypdfium2` (PDF) or `lxml` not installed                                                                                        | 501  |
 | `decode_failed`                       | no configured encoding decodes the text                                                                                          | 422  |
 | `no_text`                             | read fine, but no text lines. For a PDF: no text layer on any page, so run OCR first                                             | 422  |
 | `unreadable`                          | the file could not be opened or read (permissions, an I/O error)                                                                 | 422  |
@@ -530,10 +534,11 @@ shaped like the batch path (any common encoding, cp1250 first).
 The readers use the config's `[TEXT_INGEST]` settings and `[DOCUMENT].SOURCE_ORIGIN(_BY_KIND)`, read
 from `LANGID_CONFIG` once at start-up; a malformed value fails the start. Blank lines are always
 dropped here (`KEEP_BLANK_LINES` and `STRICT` are batch-only), and the `DOCUMENT_SOURCE_ORIGIN` env
-var is not read. Errors name the reason code: `400` for a file of a kind this service does not read,
-`422` for a supported kind that cannot be read, a document without a single text line included
-(`no_text`); the HTTP column of §4 lists them. Born-digital uploads do not accrete into a
-`document_record`.
+var is not read. Errors name the reason code: `415` `unsupported_media_type` for a file of a kind this
+service does not read (a `400` before atrium-project#32 round 2), `422` for a supported kind that cannot
+be read, a document without a single text line included (`no_text`), and `501` when a reader's optional
+dependency is not installed; the HTTP column of §4 lists them. Born-digital uploads do not accrete into
+the record sent as `document_json` (or under its deprecated name `document_record`).
 
 ## 8. Known limitations
 

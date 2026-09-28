@@ -109,16 +109,21 @@ def test_info_lists_json_as_supported_format():
 
 
 def test_process_unrecognized_extension_still_rejected():
-    """Auto-detect must still 400 on a file no reader supports (#8).
+    """Auto-detect must still refuse a file no reader supports (#8).
 
     (#31) PDF used to be the example here; it is a supported "document" now, so the
-    unsupported case is plain binary — the 400 names the reason code."""
+    unsupported case is plain binary. (atrium-project#32 round 2) The refusal is 415
+    `unsupported_media_type` (a 400 before); the reader's code is still in `detail` and is
+    also the body's `cause`, and `accepted` lists the extensions the readers take."""
     files = {"file": ("document.bin", bytes(range(256)) * 4, "application/octet-stream")}
     data = {"task_type": "auto"}
 
     response = client.post("/process", files=files, data=data)
-    assert response.status_code == 400
-    assert "binary_content" in response.json()["detail"]
+    assert response.status_code == 415
+    body = response.json()
+    assert (body["reason"], body["cause"]) == ("unsupported_media_type", "binary_content")
+    assert "binary_content" in body["detail"]
+    assert {".xml", ".txt", ".json", ".pdf", ".docx", ".gz"} <= set(body["accepted"])
 
 
 @pytest.mark.parametrize(
@@ -132,8 +137,10 @@ def test_process_rejects_images_and_legacy_office_with_reason(name, content):
     response = client.post(
         "/process", files={"file": (name, content, "application/octet-stream")}, data={"task_type": "auto"}
     )
-    assert response.status_code == 400
-    assert ("image_needs_ocr" if name.endswith(".png") else "legacy_office_unsupported") in response.json()["detail"]
+    code = "image_needs_ocr" if name.endswith(".png") else "legacy_office_unsupported"
+    assert response.status_code == 415
+    assert (response.json()["reason"], response.json()["cause"]) == ("unsupported_media_type", code)
+    assert code in response.json()["detail"]
 
 
 # ── (#31) any other text-bearing upload → task_type "document" ───────────────
@@ -480,7 +487,8 @@ def test_process_accretes_onto_a_seed_keyed_unlike_the_upload(mock_process, tmp_
     assert page7["category"] == "Text"  # the seed's own field on the same row
 
 
-# ── (#31 Phase 4) one status mapping: unsupported → 400, unreadable → 422 ─────
+# ── (#31 Phase 4) one status mapping: unsupported → 415 (a 400 before
+#    atrium-project#32 round 2), a missing reader dependency → 501, unreadable → 422 ──
 
 
 def test_a_damaged_container_found_by_sniffing_is_422():
@@ -489,10 +497,11 @@ def test_a_damaged_container_found_by_sniffing_is_422():
     assert response.status_code == 422 and response.json()["detail"].startswith("corrupt")
 
 
-def test_an_explicit_document_that_is_an_image_is_400():
+def test_an_explicit_document_that_is_an_image_is_415():
     files = {"file": ("scan.png", b"\x89PNG\r\n\x1a\n" + b"\x00" * 64, "image/png")}
     response = client.post("/process", files=files, data={"task_type": "document"})
-    assert response.status_code == 400 and response.json()["detail"].startswith("image_needs_ocr")
+    assert response.status_code == 415 and response.json()["detail"].startswith("image_needs_ocr")
+    assert response.json()["cause"] == "image_needs_ocr"
 
 
 def test_a_document_without_text_is_422_no_text():
@@ -501,29 +510,38 @@ def test_a_document_without_text_is_422_no_text():
     assert response.status_code == 422 and response.json()["detail"].startswith("no_text")
 
 
-def test_a_text_upload_that_is_not_text_is_400():
+def test_a_text_upload_that_is_not_text_is_415():
     files = {"file": ("blob.txt", bytes(range(256)) * 8, "text/plain")}
     response = client.post("/process", files=files, data={"task_type": "auto"})
-    assert response.status_code == 400 and response.json()["detail"].startswith("binary_content")
+    assert response.status_code == 415 and response.json()["detail"].startswith("binary_content")
 
 
-def test_every_reason_code_maps_to_400_413_or_422():
-    """400 unsupported; the limit codes 413 (size/count) or 422 (the reader's time budget),
-    with reason `limit_exceeded` (atrium-project#53); everything else 422."""
+def test_every_reason_code_maps_to_415_413_422_or_501():
+    """415 `unsupported_media_type` for a kind this service does not read (a 400 with no reason
+    before atrium-project#32 round 2); 501 for a missing reader dependency (one of those 400s
+    before); the limit codes 413 (size/count) or 422 (the reader's time budget), with reason
+    `limit_exceeded` (atrium-project#53); everything else 422. Every one but a named limit
+    (a LimitExceeded, whose body names the limit instead) carries the reader's code as `cause`."""
     from atrium_limits import LimitExceeded
-    from service.text_api import LIMIT_REASONS, UNSUPPORTED_REASONS, _ingest_http_error
+    from service.text_api import DEPENDENCY_REASONS, LIMIT_REASONS, UNSUPPORTED_REASONS, _ingest_http_error
     from text_formats import REASON_CODES, IngestError
 
     assert UNSUPPORTED_REASONS <= set(REASON_CODES)
+    assert DEPENDENCY_REASONS <= set(REASON_CODES)
     assert LIMIT_REASONS <= set(REASON_CODES)
+    assert not (UNSUPPORTED_REASONS & DEPENDENCY_REASONS) and not (UNSUPPORTED_REASONS & LIMIT_REASONS)
     for code in REASON_CODES:
         error = _ingest_http_error(IngestError(code))
         if isinstance(error, LimitExceeded):  # always answered with reason limit_exceeded
             status, reason = error.http_status, "limit_exceeded"
         else:
             status, reason = error.status_code, getattr(error, "reason", None)
+            assert error.extra["cause"] == code, code
         if code in UNSUPPORTED_REASONS:
-            assert (status, reason) == (400, None), code
+            assert (status, reason) == (415, "unsupported_media_type"), code
+            assert error.extra["accepted"], code
+        elif code in DEPENDENCY_REASONS:
+            assert (status, reason) == (501, None), code
         elif code == "timeout":
             assert (status, reason) == (422, "limit_exceeded"), code
         elif code in LIMIT_REASONS:

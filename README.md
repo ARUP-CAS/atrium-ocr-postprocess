@@ -912,7 +912,8 @@ extension), returning the same per-line classification fields as the batch pipel
 TEI, ABBYY/DjVu XML, Tesseract TSV, Markdown, CSV/TSV, JSONL, SRT/VTT, EML/MBOX, compressed files and ZIP bundles)
 as `task_type` `document`. `auto` keeps `.txt`/`.json` as before and decides `.xml` and every other upload
 **from its bytes**: an uncompressed ALTO root stays on the ALTO path, a file of a kind the service does not read is
-a 400 naming the reason code, a supported file that cannot be read — a document without a single text line
+a 415 `unsupported_media_type` naming the reader's code (a 400 before atrium-project#32 round 2), a supported file
+that cannot be read — a document without a single text line
 included (`no_text`) — is a 422, and one over a `[TEXT_INGEST]` size or count cap is a 413 `limit_exceeded`.
 Document results carry `page`/`page_label` per line and a `pages` summary, and are read and shaped by the same
 `text_formats.py` code and the same `[TEXT_INGEST]` settings as the batch method; a `.txt` upload
