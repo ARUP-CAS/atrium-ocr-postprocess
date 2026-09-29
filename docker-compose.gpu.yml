@@ -6,18 +6,28 @@
 # CPU-wheel image on GPU hardware unless someone had separately rebuilt with the
 # CUDA index — silently, at the ~100-400x slowdown classify_TEXT.py warns about.
 #
-# The image tag is also distinct. The CPU and GPU variants are different images
-# built from the same Dockerfile with different args; sharing one tag meant
+# The image name is also distinct. The CPU and GPU variants are different images
+# built from the same Dockerfile with different args; sharing one name meant
 # whichever was built last won, and `docker compose pull` could quietly replace
 # one with the other.
+#
+# It is a LOCAL name (atrium-project#69, roadmap B2): no workflow publishes a GPU
+# image, so the old `ghcr.io/…:<version>-gpu` could never be pulled, and
+# `pull_policy: build` keeps `docker compose pull` from asking a registry for it.
+# ATRIUM_RUNNER_IMAGE follows the name in both places: merged onto
+# docker-compose.yml, this service otherwise kept the CPU image's name, so a GPU
+# run's paradata recorded an image it did not run (roadmap B3's compose half).
 services:
   alto:
-    image: ghcr.io/ufal/atrium-alto-postprocess:${ATRIUM_VERSION:-dev}-gpu
+    image: atrium-alto-postprocess-gpu:local
+    pull_policy: build
     build:
       args:
         TORCH_INDEX_URL: ${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cu124}
+        ATRIUM_RUNNER_IMAGE: atrium-alto-postprocess-gpu:local
     environment:
       NVIDIA_VISIBLE_DEVICES: all
+      ATRIUM_RUNNER_IMAGE: atrium-alto-postprocess-gpu:local
     deploy:
       resources:
         reservations:

@@ -66,12 +66,25 @@ Before you begin, set up your environment.
     ```bash
     wget "[https://huggingface.co/facebook/fasttext-language-identification/resolve/main/model.bin](https://huggingface.co/facebook/fasttext-language-identification/resolve/main/model.bin)" -O lid.176.bin
     ```
+    The file is the Hub's `model.bin` — the NLLB fastText language-ID model, 1.18 GB, CC BY-NC 4.0 —
+    saved under the name the pipeline's config expects (`FASTTEXT_MODEL = lid.176.bin`); it is not the
+    126 MB fastText `lid.176.bin`. The Docker image fetches the same file pinned to a Hub revision and
+    checked against its SHA-256 (the `FASTTEXT_REVISION` / `FASTTEXT_SHA256` build args in the
+    [Dockerfile](Dockerfile) 📎).
 4. Copy the `v3` folder from the 📐`layoutreader` 🔧 repository [^9] to the project directory for the LR-based text extraction method:
     ```bash
     git clone [https://github.com/ppaanngggg/layoutreader.git](https://github.com/ppaanngggg/layoutreader.git)
     cp -r layoutreader/v3/ ./
     rm -rf layoutreader/
     ```
+
+> [!NOTE]
+> **Docker on Linux: run as yourself.** The published images are `ghcr.io/ufal/atrium-alto-postprocess:<version>`
+> (the batch pipeline) and `ghcr.io/ufal/atrium-alto-postprocess-api:<version>`, where `<version>` is the release
+> without its leading `v`. `./data` is part of the clone and belongs to you, while the images run as uid 10001 by
+> default: `docker-compose.yml` runs the services as `user: "${ATRIUM_UID:-10001}:0"`, so put your uid in `.env`
+> once — `echo "ATRIUM_UID=$(id -u)" >> .env`. With `docker run`, pass `--user "$(id -u):0"`. Docker Desktop
+> (macOS, Windows) needs neither. (atrium-project#69)
 
 > [!NOTE]
 > There is no `alto-tools` 🔧 install step any more. The statistics and text-extraction code paths this

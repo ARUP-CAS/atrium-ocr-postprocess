@@ -16,6 +16,12 @@ model/
 models/
 checkpoint/
 TEMP/
+# Not runtime (atrium-project#69, roadmap H5): the test suite runs on the CI runner, and
+# docs/ and the dev logs are documentation. data_samples/ STAYS: its files are runtime
+# defaults the image's own config points at.
+tests/
+docs/
+agent_dev_logs/
 *.log
 .cache/
 *.bin

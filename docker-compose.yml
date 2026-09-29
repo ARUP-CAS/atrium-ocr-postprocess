@@ -1,6 +1,13 @@
 services:
   alto:
     image: ghcr.io/ufal/atrium-alto-postprocess:${ATRIUM_VERSION:-dev}
+    # The host uid, group 0 (atrium-project#69, roadmap B6). ./data is in the clone
+    # (data/.gitkeep), owned by whoever cloned it, while the image runs as uid 10001 by
+    # default -- so without this every write to /data fails with EACCES. Every path the
+    # image writes is group-0 writable, so any uid with group 0 works. On Linux set
+    # ATRIUM_UID in .env (`echo "ATRIUM_UID=$(id -u)" >> .env`); Docker Desktop needs
+    # nothing. Unset, this is the image's own uid 10001. Inherited by `api` (extends:).
+    user: "${ATRIUM_UID:-10001}:0"
     build:
       context: .
       args:
@@ -15,7 +22,7 @@ services:
     volumes:
       - ./data:/data
       - hf-cache:/cache/huggingface
-      - alto-models:/app/models          # persists lid.176.bin (seeded from image on first run)
+      - alto-models:/app/models          # persists lid.176.bin (seeded from the image only while EMPTY)
       - ./setup/config.txt:/app/setup/config.txt:ro
 
   # API profile — only starts with: docker compose --profile api up
@@ -27,10 +34,19 @@ services:
     # service's start command existed, so no runnable API image was ever published
     # (nothing to `docker pull` for Kubernetes) and the Dockerfile's HEALTHCHECK /
     # STOPSIGNAL could not apply to it.
-    image: ghcr.io/ufal/atrium-alto-postprocess:${ATRIUM_VERSION:-dev}-api
+    #
+    # The published name (atrium-project#69, roadmap B2): `-api` is part of the image NAME,
+    # as docker-tool.reusable.yml publishes it, so `ATRIUM_VERSION=1.6.0-beta docker compose
+    # --profile api pull` fetches the released image. The old `…:<version>-api` tag was never
+    # published by any build.
+    image: ghcr.io/ufal/atrium-alto-postprocess-api:${ATRIUM_VERSION:-dev}
     build:
       context: .
       target: api
+      # Its own build arg (atrium-project#69): `extends: alto` MERGES `build:`, so without
+      # this line the api image baked the batch image's name into its ENV.
+      args:
+        ATRIUM_RUNNER_IMAGE: ghcr.io/ufal/atrium-alto-postprocess-api:${ATRIUM_VERSION:-dev}
     # env_file delivers every OTHER variable in .env.example into the container --
     # LOG_LEVEL, GRACEFUL_SHUTDOWN_S, HOST, RELOAD, HEALTHCHECK_PATH and
     # MAX_UPLOAD_MB were all documented but undeliverable under compose until
@@ -42,11 +58,11 @@ services:
     environment:
       # ATRIUM_RUNNER_IMAGE is overridden here on purpose: `extends: alto` (above)
       # inherits the batch service's environment block, whose ATRIUM_RUNNER_IMAGE
-      # has no `-api` suffix -- and the api stage's own build args (above) don't
-      # set one either -- so without this line, paradata recorded the BATCH image
-      # tag for requests served by the API image. (atrium-project#60, same class
-      # of defect as atrium-page-classification's.)
-      ATRIUM_RUNNER_IMAGE: ghcr.io/ufal/atrium-alto-postprocess:${ATRIUM_VERSION:-dev}-api
+      # names the batch image -- so without this line, paradata recorded the BATCH
+      # image for requests served by the API image. (atrium-project#60, same class
+      # of defect as atrium-page-classification's.) The build arg above does the same
+      # for the image's baked ENV (atrium-project#69).
+      ATRIUM_RUNNER_IMAGE: ghcr.io/ufal/atrium-alto-postprocess-api:${ATRIUM_VERSION:-dev}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:8080,http://localhost:5500}
       PORT: ${PORT:-8000}
     ports:
