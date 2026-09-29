@@ -117,9 +117,10 @@ RUN useradd --create-home --uid 10001 atrium
 #    file would never reach an existing volume.
 #
 #    PINNED AND CHECKSUMMED (roadmap H3). The URL names a Hub commit, not `main`, and the
-#    file must match the LFS SHA-256 and size. Both values are empty on purpose until they
-#    are filled from the Hub: the build FAILS CLOSED rather than falling back to `main`.
-#    Read them from the headers of the unpinned URL (no redirect):
+#    file must match the LFS SHA-256 and size. The revision and checksum below are the
+#    verified values for facebook/fasttext-language-identification/model.bin. The build
+#    still FAILS CLOSED if either value is overridden to empty.
+#    To refresh these values from the Hub, inspect the headers of the unpinned URL (no redirect):
 #      curl -sI https://huggingface.co/facebook/fasttext-language-identification/resolve/main/model.bin \
 #        | grep -iE '^(x-repo-commit|x-linked-etag|x-linked-size):'
 #    x-repo-commit -> FASTTEXT_REVISION; x-linked-etag (without the quotes) -> FASTTEXT_SHA256;
@@ -133,8 +134,8 @@ RUN useradd --create-home --uid 10001 atrium
 #    `-nv` keeps the log readable while still surfacing errors (unlike `-q`). The size
 #    check runs before the checksum only so that a truncated body or an HTML error page is
 #    named as such; the checksum is what makes the file the pinned one.
-ARG FASTTEXT_REVISION=
-ARG FASTTEXT_SHA256=
+ARG FASTTEXT_REVISION=3af127d4124fc58b75666f3594bb5143b9757e78
+ARG FASTTEXT_SHA256=8ded5749a2ad79ae9ab7c9190c7c8b97ff20d54ad8b9527ffa50107238fc7f6a
 ARG FASTTEXT_SIZE=1176355829
 RUN if [ -z "$FASTTEXT_REVISION" ] || [ -z "$FASTTEXT_SHA256" ]; then \
         echo "ERROR: FASTTEXT_REVISION and FASTTEXT_SHA256 are not set, so the fastText weights" >&2; \
