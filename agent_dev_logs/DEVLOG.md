@@ -1204,3 +1204,23 @@ week, ≈ 2026-10-02). Recorded in the #30 digest and plan; nothing switched on.
 * **Pair to remove** (issue closed 2026-09-25): `37.*`.
 
   **Not pushed: files delivered in chat.**
+
+## 2026-09-30 (after the meeting): the rename to ocr-postprocess (#56)
+
+* **What arrived:** the meeting with AMČR renamed the tool (the report's §2.2 row now reads `ocr-postprocess`), and
+  K4TEL opened #56 at 15:13: rename to `ufal/atrium-ocr-postprocess`, keep the pipeline.
+* **Dev logs:**
+  * `56.*` 🆕 — three layers of name: the repository (redirects git and web, not Pages or GHCR), the service identity
+    (the hub's release gate fails a changed `x-atrium-service` whatever the version — a declared-rename rule first),
+    the program id (a successor beside `alto-postprocess` in the shared contract, one schema round with hub #71/#73).
+    After the 16 October time-box release; first release under the new name 2.0.0-beta; script names kept; this
+    repository owns the readers the born-digital converter vendors (llm-enrich#28 §B).
+  * `2.*`, `3.*`, `4.*`, `30.*`, `23.*` 🧭 post-meeting banners: the rename comes after the box; per issue, what it
+    touches (the line-category table, born-digital scoring after W3, the docs around `categorization_logic.md`, the
+    re-scoring pass under the successor map, #23 resuming in the renamed repository).
+* **Found:** the program name is written in six places here (`document_hook.py:43`, `extract_ALTO_2_TXT.py:167`,
+  `extract_JSON_2_TXT.py:226`, `extract_LytRdr_ALTO_2_TXT.py:415`, `extract_LLM_ALTO_2_TXT.py:211`,
+  `text_stats_create.py:163`) and read at `text_util.py:91`; ~1 060 mentions of `alto-postprocess` across the six
+  repositories.
+
+  **Not pushed: files delivered in chat.**
