@@ -161,7 +161,10 @@ are assigned by a fast CPU pre-filter before any model inference. The remaining 
   unreadable document (encrypted, corrupt, no text) or a JSON upload that does not parse is a `422`. See
   [Errors](#errors).
 * `document_json` (optional): a baseline ATRIUM document record, or an AMČR seed (`doc_id`, `source`). The
-  response then carries `document_json`: the record with this tool's `pages`/`lines` fields merged in. A
+  response then carries `document_json`: the record with this tool's `pages`/`lines` fields merged in, and
+  `source` given what it lacks. This service reads the source, so it records `source.origin`; every value
+  the record already has is kept (first writer wins), and the upload's `sha256` never joins a seed's
+  `sha512`, since the ALTO is not the archive's original (atrium-project#71). A
   record that cannot be opened (not JSON, not an object, a newer `schema_version` major) is a `422`
   `invalid_record`; an empty part counts as none.
 * `document_record` (optional, **deprecated**): the earlier name of `document_json`; its record comes back as
@@ -169,6 +172,15 @@ are assigned by a fast CPU pre-filter before any model inference. The remaining 
 
 Every response carries `limits_applied`: the limits that shaped the result without refusing it (see
 [Limits](#limits)), `[]` when none did.
+
+Every response also carries **`paradata`**, the call's provenance (atrium-project#71): one Process Run
+Crate `CreateAction`, built by `atrium_rocrate.create_action()`. Its `@id` is the call's `run_uuid`,
+which also stamps every block the call wrote into the record; `object` is the upload (by content hash)
+and the record sent, `result` the blocks written and the classified lines (`cleaned_lines.json`);
+`agent` is `ATRIUM_RUN_AGENT` when set. The service writes no paradata file. An error response carries
+no action. Hub
+[`docs/rocrate_export.md`](https://github.com/ufal/atrium-project/blob/main/docs/rocrate_export.md) §5
+describes it.
 
 ```bash
 curl -X POST "http://localhost:8000/process" \

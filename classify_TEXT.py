@@ -1041,6 +1041,7 @@ def process_document(task):
     document_json_dir = _rest[1] if len(_rest) > 1 else ""
     doc_run_id = _rest[2] if len(_rest) > 2 else None
     doc_paradata_ref = _rest[3] if len(_rest) > 3 else ""
+    doc_run_uuid = _rest[4] if len(_rest) > 4 else None
 
     try:
         out_path = Path(output_dir) / f"{file_id}.csv"
@@ -1168,6 +1169,7 @@ def process_document(task):
                 doc_run_id,
                 doc_paradata_ref,
                 merge_blocks={"lines": _lines_records_from_df(df)},
+                run_uuid=doc_run_uuid,
             )
 
         return {"status": "success", "file_id": file_id, "lines": processed_count, "reclassified": reclassified}
@@ -1323,6 +1325,7 @@ def main(argv=None):
     _doc_cfg.read(config_path)
     _document_json_dir = document_hook.resolve_document_json_dir(_doc_cfg.get("DOCUMENT", "JSON_DIR", fallback=""))
     _doc_run_id = logger.run_id
+    _doc_run_uuid = logger.run_uuid
     _doc_paradata_ref = document_hook.paradata_ref_for(logger)
 
     grouped_tasks = []
@@ -1343,6 +1346,7 @@ def main(argv=None):
                 _document_json_dir,
                 _doc_run_id,
                 _doc_paradata_ref,
+                _doc_run_uuid,
             )
         )
 

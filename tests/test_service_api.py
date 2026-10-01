@@ -333,7 +333,7 @@ def _real_baseline(tmp_path, pages=("7", "8", "9"), doc_id=_DOC_ID):
 @patch("service.text_api.text_manager.process_alto", create=True)
 def test_process_accretes_real_lines_and_pages_onto_a_baseline(mock_process, tmp_path, monkeypatch):
     """(J1 + D2) One POST, four separate regressions pinned."""
-    monkeypatch.chdir(tmp_path)  # ParadataLogger writes ./paradata
+    monkeypatch.chdir(tmp_path)
     mock_process.return_value = {"type": "alto_xml", "cleaned_lines": _CLASSIFIED_LINES}
     baseline_path = _real_baseline(tmp_path)
     baseline_before = load_document(str(baseline_path))
@@ -388,7 +388,9 @@ def test_process_accretes_real_lines_and_pages_onto_a_baseline(mock_process, tmp
 
     # (c) An upstream block passes through byte-for-byte.
     assert record["page_categories"] == baseline_before["page_categories"]
-    assert record["source"] == baseline_before["source"]
+    # `source` is first-writer-wins: every value the baseline has is kept, and the reader of
+    # the upload only fills in what it lacks (atrium-project#71).
+    assert {key: record["source"][key] for key in baseline_before["source"]} == baseline_before["source"]
 
     # Rule 4: this contribution is stamped, and the baseline is acknowledged.
     assert record["assembled"]["blocks"]["lines"]["program"] == "alto-postprocess"

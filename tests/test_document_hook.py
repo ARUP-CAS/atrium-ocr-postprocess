@@ -109,6 +109,42 @@ def test_write_document_block_set_blocks_uses_set_block(tmp_path):
     assert record["assembled"]["blocks"]["content"]["program"] == "alto-postprocess"
 
 
+def test_write_document_block_keeps_an_amcr_seed_and_stamps_the_run(tmp_path, capsys):
+    """atrium-project#71: a seed at the record's path (a foreign doc_id, the archive's sha512,
+    file name and media type) is a valid baseline, not an invalid one. The stage keeps the
+    seed's identity, adds the origin, and stamps its run_uuid on its block and its entry."""
+    run_uuid = "urn:uuid:0b6f2c3e-7f43-4d6e-9a59-2f1c2b8e5d10"
+    seed = {
+        "doc_id": "AMCR-F-CTX01",
+        "source": {"sha512": "c" * 128, "filename": "CTX01.pdf", "media_type": "application/pdf"},
+    }
+    with open(document_path(str(tmp_path), "CTX01"), "w", encoding="utf-8") as f:
+        json.dump(seed, f)
+
+    written = write_document_block(
+        str(tmp_path),
+        "CTX01",
+        run_id="r1",
+        paradata_ref=run_uuid,
+        run_uuid=run_uuid,
+        source={
+            "sha256": "a" * 64,
+            "filename": "CTX01.alto.xml",
+            "media_type": "application/alto+xml",
+            "origin": "ABBYY-ALTO",
+        },
+        merge_blocks={"pages": [{"page": "1", "quality_score": 0.98, "quality_band": "Clear"}]},
+    )
+
+    assert written == document_path(str(tmp_path), "CTX01")
+    record = load_document(written)
+    assert record["doc_id"] == "AMCR-F-CTX01"
+    assert record["source"] == {**seed["source"], "origin": "ABBYY-ALTO"}
+    assert record["assembled"]["blocks"]["pages"]["run_uuid"] == run_uuid
+    assert record["provenance"]["contributors"][-1]["run_uuid"] == run_uuid
+    assert "WARNING" not in capsys.readouterr().err
+
+
 def _write_pages(output_text_dir, file_id, page_texts):
     save_dir = output_text_dir / file_id
     save_dir.mkdir(parents=True, exist_ok=True)

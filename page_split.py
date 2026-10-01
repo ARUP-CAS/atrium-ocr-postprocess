@@ -608,6 +608,7 @@ def main(argv=None):
                         doc_id,
                         _logger.run_id,
                         _doc_paradata_ref,
+                        run_uuid=_logger.run_uuid,
                         source={
                             "sha256": _sha256_of(input_file_path),
                             "filename": filename,

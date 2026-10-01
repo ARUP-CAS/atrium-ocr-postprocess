@@ -192,6 +192,8 @@ from pathlib import Path  # noqa: E402
 from unittest.mock import patch  # noqa: E402
 
 import atrium_openapi  # noqa: E402
+import atrium_rocrate  # noqa: E402
+from atrium_document import validate_document  # noqa: E402
 
 _SPEC = atrium_openapi.load(Path(__file__).resolve().parent.parent / "service" / "openapi.json")
 
@@ -256,6 +258,11 @@ def test_an_alto_response_conforms_to_the_published_schema(mock_process):
     body = _conforms(200, client.post("/process", files={"file": ("p.alto.xml", _ONE_PAGE_ALTO, "application/xml")}))
     assert body["type"] == "alto_xml" and body["limits_applied"] == []
     assert "document_json" not in body and "document_json_out" not in body
+    # The run comes back as its CreateAction (atrium-project#71): the upload in, the lines out.
+    action = body["paradata"]
+    assert atrium_rocrate.action_problems(action) == []
+    assert [entity["name"] for entity in action["object"]] == ["p.alto.xml"]
+    assert [entity["name"] for entity in action["result"]] == ["cleaned_lines.json"]
 
 
 @patch("service.text_api.text_manager.process_document", create=True)
@@ -274,7 +281,7 @@ def test_a_pdf_run_logs_pdfium_in_its_paradata(mock_process, tmp_path, monkeypat
     by PDFium puts `pypdfium2` in the run's licence detail, as text_split.py always did."""
     from atrium_paradata import ParadataLogger
 
-    monkeypatch.chdir(tmp_path)  # ParadataLogger writes ./paradata
+    monkeypatch.chdir(tmp_path)
     logged = []
     monkeypatch.setattr(ParadataLogger, "log_component", lambda self, name, license=None: logged.append(name))
 
@@ -297,7 +304,7 @@ def test_a_seed_comes_back_accreted_under_the_name_it_was_sent_with(mock_process
     `document_record` → `document_json_out`, as before. The returned record is held to the
     vendored record schema, through the spec's AtriumDocument component — the type AMČR's
     generated client deserialises it into."""
-    monkeypatch.chdir(tmp_path)  # ParadataLogger writes ./paradata
+    monkeypatch.chdir(tmp_path)
     mock_process.return_value = json.loads(json.dumps(_ALTO_RESULT))
     files = {
         "file": ("scan_0001.alto.xml", _ONE_PAGE_ALTO, "application/xml"),
@@ -326,6 +333,55 @@ def test_a_seed_with_a_byte_order_mark_is_accepted(mock_process, tmp_path, monke
         ),
     }
     assert _conforms(200, client.post("/process", files=files))["document_json"]["doc_id"] == _SEED_ID
+
+
+#: An AMČR seed (atrium-project#71): the file id and the archive's own view of the original.
+_AMCR_SEED = {
+    "doc_id": _SEED_ID,
+    "source": {"sha512": "c" * 128, "filename": "C-202000543A-DT-27.pdf", "media_type": "application/pdf"},
+}
+
+
+@patch("service.text_api.text_manager.process_alto", create=True)
+def test_an_amcr_seed_keeps_its_identity_and_the_run_is_returned(mock_process, tmp_path, monkeypatch):
+    """atrium-project#71, end to end through /process: the seed's id, digest, file name and media
+    type come back unchanged, and this service, the reader of the source, adds only the origin
+    (its sha256 is of the ALTO, not of the original). The blocks it wrote carry the run_uuid that
+    is the returned CreateAction's @id, and nothing is written to the working directory."""
+    monkeypatch.chdir(tmp_path)
+    mock_process.return_value = json.loads(json.dumps(_ALTO_RESULT))
+    files = {
+        "file": ("scan_0001.alto.xml", _ONE_PAGE_ALTO, "application/xml"),
+        "document_json": ("seed.document.json", json.dumps(_AMCR_SEED).encode("utf-8"), "application/json"),
+    }
+    body = _conforms(200, client.post("/process", files=files))
+    record = body["document_json"]
+    validate_document(record)
+    assert record["doc_id"] == _SEED_ID
+    assert record["source"] == {**_AMCR_SEED["source"], "origin": "ABBYY-ALTO"}
+
+    action = body["paradata"]
+    assert atrium_rocrate.action_problems(action) == []
+    stamps = record["assembled"]["blocks"]
+    assert {stamps[block]["run_uuid"] for block in ("pages", "lines")} == {action["@id"]}
+    assert record["provenance"]["contributors"][-1]["paradata_ref"] == action["@id"]
+    assert {"#record"} <= {entity["@id"] for entity in action["object"]}
+    assert {"#block-pages", "#block-lines"} <= {entity["@id"] for entity in action["result"]}
+    assert list(tmp_path.iterdir()) == []
+
+
+@patch("service.text_api.text_manager.process_document", create=True)
+def test_a_born_digital_upload_leaves_the_seeds_origin_to_its_reader(mock_process):
+    """The origin is written by the tool it names: a born-digital PDF is digital-convert's, so
+    /process neither adds blocks nor names the origin, and the seed goes back as it came."""
+    mock_process.return_value = {**json.loads(json.dumps(_DOC_RESULT)), "origin": "digital-born-pdf"}
+    files = {
+        "file": ("x.pdf", b"%PDF-1.4", "application/pdf"),
+        "document_json": ("seed.document.json", json.dumps(_AMCR_SEED).encode("utf-8"), "application/json"),
+    }
+    body = _conforms(200, client.post("/process", files=files, data={"task_type": "document"}))
+    assert body["document_json"]["source"] == _AMCR_SEED["source"]
+    assert atrium_rocrate.action_problems(body["paradata"]) == []
 
 
 @pytest.mark.parametrize("record", [b"[1, 2]", b"{not json", b'{"schema_version": "9.0", "doc_id": "x"}'])

@@ -277,6 +277,7 @@ def main(argv: Optional[list] = None) -> int:
                     doc_id,
                     _logger.run_id,
                     doc_ref,
+                    run_uuid=_logger.run_uuid,
                     merge_blocks={"pages": pages} if pages else None,
                     set_blocks={"content": content} if pages else None,
                 )

@@ -320,6 +320,7 @@ def main():
     _doc_cfg.read(args.config)
     document_json_dir = document_hook.resolve_document_json_dir(_doc_cfg.get("DOCUMENT", "JSON_DIR", fallback=""))
     doc_run_id = logger.run_id
+    doc_run_uuid = logger.run_uuid
     doc_paradata_ref = document_hook.paradata_ref_for(logger)
 
     print(f"Aggregating {len(csv_files)} documents using Multiprocessing...")
@@ -355,6 +356,7 @@ def main():
                             doc_run_id,
                             doc_paradata_ref,
                             merge_blocks={"pages": _page_records_from_stats(result)},
+                            run_uuid=doc_run_uuid,
                         )
                     else:
                         logger.log_skip(original_file.name, "Empty or invalid CSV structure")

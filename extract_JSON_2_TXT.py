@@ -269,6 +269,7 @@ def main(argv: Optional[list] = None) -> None:
                 doc_id,
                 _logger.run_id,
                 _doc_paradata_ref,
+                run_uuid=_logger.run_uuid,
                 merge_blocks={"pages": pages} if pages else None,
                 set_blocks={"content": content} if pages else None,
             )

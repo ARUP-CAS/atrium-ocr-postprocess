@@ -96,10 +96,13 @@ jobs:
           # atrium_openapi.py: service/atrium_service.py imports it (lazily) to finish and
           # digest the OpenAPI document -- /openapi.json and /info `openapi_sha256` need it
           # (atrium-project#32 round 2); the closure check below finds that import too.
+          # atrium_rocrate.py: the service builds each call's CreateAction, returned as the
+          # response's `paradata` (atrium-project#71).
           cp atrium_document.py \
              atrium_document.schema.json \
              atrium_openapi.py \
              atrium_paradata.py \
+             atrium_rocrate.py \
              atrium_limits.py \
              tool_limits.py \
              atrium_vocab.py \

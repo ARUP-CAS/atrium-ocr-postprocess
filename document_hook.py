@@ -36,7 +36,7 @@ import sys
 from collections import OrderedDict
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from atrium_document import DocumentRecord, load_document, resolve_originator, validate_document
+from atrium_document import DocumentRecord, load_document, resolve_originator, validate_baseline, validate_document
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +162,10 @@ def _baseline_is_invalid(path: str) -> bool:
     A baseline that cannot even be READ is not this function's problem —
     `DocumentRecord.open()` reports and raises on it a few lines later, with the
     right message.
+
+    An AMČR seed (`doc_id` and `source` only, atrium-project#71) is checked against the seed
+    profile (`validate_baseline`), not the full schema it could never pass: it used to be
+    reported here as an invalid baseline, which also demoted this stage's own output gate.
     """
     if not path or not os.path.exists(path):
         return False
@@ -170,7 +174,7 @@ def _baseline_is_invalid(path: str) -> bool:
     except Exception:
         return False
     try:
-        validate_document(record)
+        validate_baseline(record)
     except (RuntimeError, FileNotFoundError) as exc:
         # RuntimeError = jsonschema missing; FileNotFoundError = the schema itself
         # was not vendored next to the module. Neither means "the record is bad".
@@ -270,6 +274,7 @@ def write_document_block(
     source: Optional[Dict[str, Any]] = None,
     set_blocks: Optional[Dict[str, Any]] = None,
     merge_blocks: Optional[Dict[str, List[Dict[str, Any]]]] = None,
+    run_uuid: Optional[str] = None,
 ) -> Optional[str]:
     """Open `<doc_id>.document.json` under `document_json_dir` (if configured and if
     it already exists), apply this stage's own contribution, and write it back in
@@ -278,6 +283,9 @@ def write_document_block(
 
     Returns the path written, or None when nothing was written. Callers read the
     record back from that path (atrium-project#68).
+
+    `run_uuid` is the stage's `ParadataLogger.run_uuid` (atrium-project#71): stamped with every
+    block and the contributor entry, and the `@id` of the run's CreateAction.
 
     "In place" is literal: the record goes back to `path`, not to finalize()'s default
     `<record doc_id>.document.json`. The two differ whenever the baseline is keyed by
@@ -332,6 +340,7 @@ def write_document_block(
         PROGRAM_NAME,
         baseline=path,
         run_id=run_id,
+        run_uuid=run_uuid,
         paradata_ref=paradata_ref,
         out_dir=document_json_dir,
     ) as doc:

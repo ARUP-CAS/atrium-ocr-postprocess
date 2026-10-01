@@ -413,7 +413,12 @@ def main(argv=None) -> int:
                     # The record is written before the pages are swapped in, so a failed
                     # record never leaves pages that later stages would categorize.
                     document_hook.write_document_block(
-                        document_json_dir, doc_id, _logger.run_id, _doc_paradata_ref, source=source
+                        document_json_dir,
+                        doc_id,
+                        _logger.run_id,
+                        _doc_paradata_ref,
+                        source=source,
+                        run_uuid=_logger.run_uuid,
                     )
                 except BaseException:
                     shutil.rmtree(staged, ignore_errors=True)

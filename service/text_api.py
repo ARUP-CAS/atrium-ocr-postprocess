@@ -94,10 +94,11 @@ from utils import parse_alto_page_labels  # noqa: E402
 # everywhere except the one launch context that matters in production
 # (`python service/text_api.py`, the `api` stage ENTRYPOINT), where the image died at
 # import. Keep them below the bootstrap; `tests/test_service_entrypoint.py` enforces it.
+import atrium_rocrate  # noqa: E402
 from atrium_document import canonical_doc_id, resolve_originator  # noqa: E402
 from atrium_limits import LimitExceeded, LimitNotes  # noqa: E402
 from atrium_paradata import ParadataLogger  # noqa: E402
-from document_hook import PROGRAM_NAME, quality_band, write_document_block  # noqa: E402
+from document_hook import PROGRAM_NAME, quality_band, resolve_input_origin, write_document_block  # noqa: E402
 from text_formats import COMPRESSION_SUFFIXES, READERS, IngestError, compression_of, sniff_kind  # noqa: E402
 from tool_limits import (  # noqa: E402
     LIMITS,
@@ -309,8 +310,10 @@ class ProcessResponse(BaseModel):
         ),
     )
     paradata: Optional[CreateAction] = Field(
-        None,
-        description="The run's provenance (atrium-project#67 R2). Not returned yet: always absent.",
+        description=(
+            "The call's provenance: its Process Run Crate `CreateAction` (atrium-project#71), whose `@id` is the "
+            "`run_uuid` stamped into the returned record."
+        ),
     )
 
 
@@ -737,18 +740,25 @@ async def process_document(
 
     _refuse_if_draining()
 
-    # Initialize ParadataLogger with the required config argument and unified program name.
-    # config_dir: this repo keeps para_config.txt under setup/, and the logger looks for it in
-    # config_dir — at the default "." it found nothing, so every API record said
-    # tool_version "unknown" with no components (atrium-project#53 D9; #67 R2 returns it).
+    # The call's paradata. config_dir: this repo keeps para_config.txt under setup/, and the
+    # logger looks for it in config_dir — at the default "." it found nothing, so every API
+    # record said tool_version "unknown" with no components (atrium-project#53 D9).
+    # paradata_dir=None (atrium-project#71): nothing is written to the container's working
+    # directory, which used to collect one paradata/ file per request; the run goes back as the
+    # response's `paradata`, and its run_id / run_uuid stamp the record.
     para_logger = ParadataLogger(
-        config=PARA_CONFIG_PATH, program=PROGRAM_NAME, config_dir=str(Path(PARA_CONFIG_PATH).parent)
+        config={"endpoint": "/process", "task_type": task_type},
+        program=PROGRAM_NAME,
+        paradata_dir=None,
+        config_dir=str(Path(PARA_CONFIG_PATH).parent),
     )
 
     # Read in bounded chunks and refused once over MAX_UPLOAD_MB (413 limit_exceeded), rather
     # than copied to disk whole and measured afterwards (atrium-project#53).
     upload_mb = MAX_UPLOAD.get()
     content = await read_upload_bounded(file, upload_mb, "File")
+    # What the call read, by content (the action's `object`), taken before `content` is dropped.
+    upload_entity = atrium_rocrate.file_entity(file.filename, content, media_type=file.content_type)
 
     # The record, read before any model runs so a record that cannot be opened is refused
     # up front (422 `invalid_record`, atrium-project#32 round 2); it used to reach the
@@ -859,8 +869,10 @@ async def process_document(
                     document_json_dir=doc_tmp_dir,
                     doc_id=doc_id,
                     run_id=para_logger.run_id,
-                    paradata_ref="",  # Left empty for stateless API responses
+                    paradata_ref=para_logger.paradata_ref,  # the run_uuid: the service writes no file
+                    source=_upload_source(task_type, result, file.filename, upload_entity["sha256"]),
                     merge_blocks={"pages": page_metrics, "lines": lines_metrics},
+                    run_uuid=para_logger.run_uuid,
                 )
 
                 # Read back the record from the path the hook wrote (atrium-project#68), not
@@ -875,7 +887,9 @@ async def process_document(
         for name in sorted(components):
             para_logger.log_component(name)
         para_logger.note_limits(notes)
+        para_logger.log_document_success()
         para_logger.finalize()
+        result["paradata"] = _run_action(para_logger, upload_entity, result, record_key, doc_id)
         return JSONResponse(content=result)
 
     except (HTTPException, LimitExceeded):
@@ -889,6 +903,52 @@ async def process_document(
     finally:
         if os.path.exists(tmp_path):
             os.remove(tmp_path)
+
+
+#: The reader kind of each non-document task type, for its default origin and media type.
+_TASK_KINDS = {"alto": "alto", "json": "json", "text": "txt"}
+
+
+def _upload_source(task_type: str, result: Dict[str, Any], filename: str, sha256: str) -> Optional[Dict[str, Any]]:
+    """`source` as this call read it, for the record (atrium-project#71), or None.
+
+    This service reads the source, so it records the origin, like page_split.py on the batch
+    path; a record that already has a `source` (an AMČR seed, an earlier run) keeps every value
+    it has, since the first writer wins, and only gains what it lacks. The origin is resolved
+    from the same [DOCUMENT] keys as the batch path (the DOCUMENT_SOURCE_ORIGIN env var is a
+    batch-run knob, not read here). An origin another tool originates (a born-digital upload)
+    is not this service's to write, and neither is the rest of `source` then: None.
+    """
+    if task_type == "document":
+        origin, media_type = result.get("origin") or "", result.get("media_type") or ""
+    else:
+        _limits, _options, configured, by_kind = ingest_settings()
+        reader = READERS[_TASK_KINDS[task_type]]
+        origin = resolve_input_origin(
+            _TASK_KINDS[task_type], reader.default_origin, configured=configured, by_kind=by_kind
+        )
+        media_type = reader.media_type
+    if resolve_originator(origin) not in (None, PROGRAM_NAME):
+        return None
+    return {"sha256": sha256, "filename": filename, "media_type": media_type or None, "origin": origin or None}
+
+
+def _run_action(
+    run: ParadataLogger, upload: Dict[str, Any], result: Dict[str, Any], record_key: str, doc_id: str
+) -> Dict[str, Any]:
+    """The call's CreateAction (atrium-project#71): what it read and what it wrote.
+
+    `object` is the upload and, when one was sent, the record; `result` is the record's blocks
+    this call stamped and the classified lines it answers with.
+    """
+    record = result.get(record_key)
+    inputs = [upload]
+    if record is not None:
+        inputs.append(atrium_rocrate.record_entity(str(record.get("doc_id") or doc_id)))
+    outputs = atrium_rocrate.block_entities(atrium_rocrate.blocks_written(record, run.run_uuid))
+    lines = json.dumps(result.get("cleaned_lines") or [], ensure_ascii=False, sort_keys=True).encode("utf-8")
+    outputs.append(atrium_rocrate.file_entity("cleaned_lines.json", lines, media_type="application/json"))
+    return atrium_rocrate.create_action(run.record, inputs=inputs, outputs=outputs)
 
 
 # @app.post("/process")
