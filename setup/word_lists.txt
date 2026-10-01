@@ -54,12 +54,12 @@
 # switch on is Q5a in issue #30; until it is answered they stay commented out.
 [allowed]
 # ── old and dialect spellings ──
-# ssuti        # old spelling of `suť` (rubble) — @david-spacil, 2026-09-22
-# ssutí        # the same word, another old form — @david-spacil, 2026-09-22
-# ssutě        # the same word, another old form — @david-spacil, 2026-09-22
+ssuti        # old spelling of `suť` (rubble) — @david-spacil, 2026-09-22
+ssutí        # the same word, another old form — @david-spacil, 2026-09-22
+ssutě        # the same word, another old form — @david-spacil, 2026-09-22
 #
 # ── abbreviations and house conventions ──
-# ppole        # `popelnicová pole`, urnfield culture; `pp` doubled for the
+ppole        # `popelnicová pole`, urnfield culture; `pp` doubled for the
 #              # plural, as in `pp.` for pages — @david-spacil, 2026-09-19.
 #              # A convention of ARUB's 2010s forms, not a scanning error.
 #
@@ -70,13 +70,13 @@
 # exactly where it is least reliable. The split does nothing for the rest:
 # `Kaukasus`, `Hallstatthaus` and `Schuhleistenkeilbruchstueck` are convicted
 # on letter variety in every language, and `Forsterhaus` by no shape test.
-# Dauerleihe   # permanent loan — museum term, 286 lines
-# Bauerleihe   # the same term, another reading
-# Neuotting    # Neuötting, Bavarian place name
-# Feuilleton   # newspaper section heading
-# Forsterhaus  # forester's house
-# Kaukasus     # the Caucasus
-# Hallstatthaus            # Hallstatt-period building
+Dauerleihe   # permanent loan — museum term, 286 lines
+# Bauerleihe   # real OCR damage
+Neuotting    # Neuötting, Bavarian place name
+Feuilleton   # newspaper section heading
+Forsterhaus  # forester's house
+Kaukasus     # the Caucasus
+Hallstatthaus            # Hallstatt-period building
 # Schuhleistenkeilbruchstueck   # shoe-last adze fragment; a real compound, and
 #              # the reason no length or letter-variety cut can separate this
 #              # class from rubbish of the same shape (issue #30 D34)
@@ -86,35 +86,35 @@
 # is configured, and no such table ships with this repository -- except the
 # `-aceae` family names at the end, which the taxonomic-suffix exemption spares
 # without one.
-# malakofauna  # mollusc fauna
-# diapozitiv   # slide (photographic)
-# occipitale   # occipital bone
-# equus        # horse — genus
-# caballus     # horse — species epithet
-# triticum     # wheat — genus
-# monococcum   # einkorn — species epithet
-# lepus        # hare — genus
-# europaeus    # European — species epithet
-# arvicola     # vole — genus
-# terrestris   # ground-dwelling — species epithet
-# linum        # flax — genus
-# usitatissimum            # common flax — species epithet
-# poaceae      # grass family
-# rosaceae     # rose family
-# fabaceae     # legume family
-# brassicaceae # cabbage family
-# cyperaceae   # sedge family
-# chenopodiaceae           # goosefoot family
-# asteraceae   # daisy family
-# betulaceae   # birch family
-# fagaceae     # beech family
-# polygonaceae # knotweed family
+malakofauna  # mollusc fauna
+diapozitiv   # slide (photographic)
+occipitale   # occipital bone
+equus        # horse — genus
+caballus     # horse — species epithet
+triticum     # wheat — genus
+monococcum   # einkorn — species epithet
+lepus        # hare — genus
+europaeus    # European — species epithet
+arvicola     # vole — genus
+terrestris   # ground-dwelling — species epithet
+linum        # flax — genus
+usitatissimum            # common flax — species epithet
+poaceae      # grass family
+rosaceae     # rose family
+fabaceae     # legume family
+brassicaceae # cabbage family
+cyperaceae   # sedge family
+chenopodiaceae           # goosefoot family
+asteraceae   # daisy family
+betulaceae   # birch family
+fagaceae     # beech family
+polygonaceae # knotweed family
 #
 # ── loans and toponyms ──
-# naiade       # naiad — mussel genus, and a vowel-run false positive
-# beuern       # place-name element, Bavarian
-# oueste       # French `ouest` variant in a scanned heading
-# kaaden       # Kadaň, German form
+# naiade       # not present in the corpus?
+# beuern       # OCR damage: should be bauern
+# oueste       # not present in the corpus?
+kaaden       # Kadaň, German form
 
 
 # ── [neutral] ───────────────────────────────────────────────────────────────
