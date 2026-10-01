@@ -229,7 +229,7 @@ def test_a_document_over_max_pages_is_413_limit_exceeded(client, ingest_config, 
 
 @patch("service.text_api.text_manager.process_text_file", create=True)
 def test_the_response_carries_limits_applied(mock_process, client):
-    def process(path, notes=None):
+    def process(path, notes=None, components=None):
         notes.note(tool_limits.MAX_LINE_CHARS, "split", 3)
         return {"type": "plain_text", "cleaned_lines": []}
 

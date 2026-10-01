@@ -24,7 +24,7 @@ import tempfile
 from collections import OrderedDict
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Set, Union
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -783,6 +783,10 @@ async def process_document(
     # Every limit that shapes this result without refusing it (atrium-project#53): passed
     # down explicitly, returned as `limits_applied` and recorded in the paradata.
     notes = LimitNotes()
+    # The licensed reader components this upload needed (pypdfium2 for a PDF,
+    # charset_normalizer for a detected encoding), logged like the CLI logs them, so an API
+    # run records the same licences (atrium-project#6, #72).
+    components: Set[str] = set()
 
     try:
         if task_type == "sniff":
@@ -817,12 +821,16 @@ async def process_document(
                 ) from exc
         elif task_type == "document":
             try:
-                result = await asyncio.to_thread(text_manager.process_document, tmp_path, notes=notes)
+                result = await asyncio.to_thread(
+                    text_manager.process_document, tmp_path, notes=notes, components=components
+                )
             except IngestError as exc:
                 raise _ingest_http_error(exc) from exc
         else:
             try:
-                result = await asyncio.to_thread(text_manager.process_text_file, tmp_path, notes=notes)
+                result = await asyncio.to_thread(
+                    text_manager.process_text_file, tmp_path, notes=notes, components=components
+                )
             except IngestError as exc:
                 raise _ingest_http_error(exc) from exc
 
@@ -864,6 +872,8 @@ async def process_document(
                     result[record_key] = json.load(bf)
         # ------------------------------------
 
+        for name in sorted(components):
+            para_logger.log_component(name)
         para_logger.note_limits(notes)
         para_logger.finalize()
         return JSONResponse(content=result)

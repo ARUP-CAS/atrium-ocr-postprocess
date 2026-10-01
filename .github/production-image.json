@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "The production image of this repository and what it is made of (atrium-project#72 A.3).",
+    "Checked on every push by the hub's workflow-lint.reusable.yml (tools/ci/image_closure.py):",
+    "every first-party file the entrypoint can execute must be listed here or be a hub-canonical",
+    "shared component (docs/templates/shared/MANIFEST.json); a listed file it no longer reaches",
+    "fails too. Run it locally with: python ../atrium-project/tools/ci/image_closure.py",
+    "--repo-root . --worktree",
+    "The pilot pins `-api` (python service/text_api.py, so service/ is on sys.path and its",
+    "bare imports resolve there); `base` is the batch pipeline of the same stage",
+    "(run_pipeline.py), published, never pinned. Renamed to ocr-postprocess by",
+    "atrium-alto-postprocess#56: the image name changes, this list does not."
+  ],
+  "image": "ghcr.io/ufal/atrium-alto-postprocess-api",
+  "target": "api",
+  "entrypoint": "service/text_api.py",
+  "stage": "OCR output and text-bearing files to lines, scored: POST /process",
+  "core": [
+    "service/text_api.py",
+    "service/text_inference.py",
+    "service/utils.py",
+    "classify_TEXT.py",
+    "document_hook.py",
+    "extract_JSON_2_TXT.py",
+    "page_split.py",
+    "text_formats.py",
+    "text_util.py",
+    "tool_limits.py"
+  ],
+  "vendored": {},
+  "moving": {}
+}

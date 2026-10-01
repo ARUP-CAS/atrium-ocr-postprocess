@@ -14,7 +14,7 @@ import os
 import sys
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Set
 
 # ---------------------------------------------------------------------------
 # PATH SETUP
@@ -98,6 +98,22 @@ DOCUMENT_BATCH_LINES = tool_limits.PPL_BATCH_LINES.get()
 
 #: What calculate_perplexity_batch returns for every line of a batch it could not score.
 _PPL_FAILED = 99999.0
+
+
+def reader_components(kind: str, flags: Optional[Iterable[str]]) -> Set[str]:
+    """The `setup/para_config.txt` components a reader used for one input: `pypdfium2` for a
+    PDF, `charset_normalizer` when the encoding had to be detected.
+
+    The same rule the text-lines batch method applies (text_split.py), so an API run records
+    the same licences as a CLI run of the same file (atrium-project#6, #72): before, only the
+    CLI logged them.
+    """
+    used: Set[str] = set()
+    if kind == "pdf":
+        used.add("pypdfium2")
+    if "encoding_detected" in (flags or ()):
+        used.add("charset_normalizer")
+    return used
 
 
 class TextModelManager:
@@ -234,26 +250,36 @@ class TextModelManager:
                 value=window,
             )
 
-    def process_text_file(self, path: str, notes: Optional[LimitNotes] = None) -> Dict[str, Any]:
+    def process_text_file(
+        self, path: str, notes: Optional[LimitNotes] = None, components: Optional[Set[str]] = None
+    ) -> Dict[str, Any]:
         """Classify a plain-text upload, one line per non-empty line.
 
         (#31 Phase 4) Decoded and shaped like the batch text-lines path: any common
         encoding (cp1250 first), lines normalized and wrapped at MAX_LINE_CHARS. It
         used to be read as UTF-8 only, so a legacy-encoded upload failed with a 500.
-        Raises text_formats.IngestError for bytes that are not text.
+        Raises text_formats.IngestError for bytes that are not text. `components`, when
+        given, receives the licensed reader components the file needed (see
+        :func:`reader_components`), for the caller's paradata.
         """
         _limits, options, _configured, _by_kind = ingest_settings()
         with open(path, "rb") as f:
             data = f.read()
         lines: List[str] = []
         if data:
-            text, _enc, _flags = decode_bytes(data, options.fallback_encodings)
+            text, _enc, flags = decode_bytes(data, options.fallback_encodings)
+            if components is not None:
+                components.update(reader_components("txt", flags))
             _note_wrapped(text.splitlines(), options.max_line_chars, notes)
             lines = shape_lines([text], options.max_line_chars, keep_blank=False)
         return {"type": "plain_text", "cleaned_lines": self._classify_lines(lines, notes)}
 
     def process_document(
-        self, path: str, kind: Optional[str] = None, notes: Optional[LimitNotes] = None
+        self,
+        path: str,
+        kind: Optional[str] = None,
+        notes: Optional[LimitNotes] = None,
+        components: Optional[Set[str]] = None,
     ) -> Dict[str, Any]:
         """Classify any other text-bearing upload (#31): PDF, DOCX, ODT, XLSX, PPTX, ...
 
@@ -267,9 +293,13 @@ class TextModelManager:
         The [TEXT_INGEST] settings and the origin keys come from the config
         (ingest_settings); blank lines are always dropped here, since this path has no
         `Empty` fast track and each one would go through the perplexity model.
+        `components`, when given, receives the licensed reader components the document
+        needed (:func:`reader_components`), for the caller's paradata.
         """
         limits, options, configured, by_kind = ingest_settings()
         doc = read_document_isolated(path, limits, options, kind=kind)
+        if components is not None:
+            components.update(reader_components(doc.kind, doc.notes))
         if doc.line_count() == 0:
             raise IngestError("no_text", no_text_message(doc))
         _note_reader_limits(doc.notes, notes)

@@ -278,3 +278,39 @@ def test_process_document_without_a_text_line_is_no_text(tmp_path, ingest_config
     with pytest.raises(IngestError) as info:
         _manager_with_mocked_ft().process_document(str(tmp_path / "blank.md"))
     assert info.value.code == "no_text"
+
+
+# ── licensed reader components for the paradata (atrium-project#6, #72) ──────────────────────
+
+
+def test_reader_components_follow_the_cli_rule():
+    """Same rule as text_split.py's batch logging: PDFium for a PDF, charset-normalizer when the
+    encoding had to be detected, nothing for anything else."""
+    from service.text_inference import reader_components
+
+    assert reader_components("pdf", []) == {"pypdfium2"}
+    assert reader_components("txt", ["encoding_detected"]) == {"charset_normalizer"}
+    assert reader_components("md", None) == set()
+
+
+def test_process_document_reports_pdfium_for_a_pdf(tmp_path, monkeypatch, ingest_config):
+    pytest.importorskip("pypdfium2")
+    from tests.text_format_fixtures import pdf_bytes
+
+    ingest_config("[TEXT_INGEST]\n")
+    _patched_ppl(monkeypatch)
+    (tmp_path / "d.pdf").write_bytes(pdf_bytes([["Page one."]]))
+    components = set()
+    _manager_with_mocked_ft().process_document(str(tmp_path / "d.pdf"), components=components)
+    assert components == {"pypdfium2"}
+
+
+def test_process_text_file_reports_a_detected_encoding(tmp_path, monkeypatch, ingest_config):
+    pytest.importorskip("charset_normalizer")
+    ingest_config("[TEXT_INGEST]\n")
+    _patched_ppl(monkeypatch)
+    path = tmp_path / "cp1250.txt"
+    path.write_bytes("Zpráva o sondě\n\nčíslo tři\n".encode("cp1250"))
+    components = set()
+    _manager_with_mocked_ft().process_text_file(str(path), components=components)
+    assert components == {"charset_normalizer"}

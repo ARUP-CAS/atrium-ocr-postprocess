@@ -1224,3 +1224,13 @@ week, ≈ 2026-10-02). Recorded in the #30 digest and plan; nothing switched on.
   repositories.
 
   **Not pushed: files delivered in chat.**
+
+## 2026-09-30 — atrium-project#72 round 1: `/process` logs its PDF and encoding readers; the production image declared
+* `service/text_inference.reader_components()` names the components the document reader used (`pypdfium2` for a PDF,
+  `charset_normalizer` when the encoding was detected); `process_document`/`process_text_file` collect them and
+  `service/text_api.py` logs each with `para_logger.log_component`, as the CLI (`text_split.py`) already did
+  (atrium-project#6, the 09-26 promise). Tests in `tests/test_text_inference.py` and `tests/test_api_contract.py`.
+* `.github/production-image.json` (the `api` target: `service/text_api.py` and what it reaches), checked by the hub's
+  `tools/ci/image_closure.py`; `docker.yml` names `api` as the production target. Revendored the three
+  declared-rename files — the rule #56 needs (`attach_openapi_contract(..., previous="alto-postprocess")` at the rename).
+* Tag draft: `v1.7.0-beta`. **Not pushed: files delivered in chat.**

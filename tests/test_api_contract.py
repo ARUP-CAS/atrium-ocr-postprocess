@@ -268,6 +268,28 @@ def test_a_document_response_conforms_including_its_pages(mock_process):
     assert [page["page_label"] for page in body["pages"]] == ["i", "ii"]
 
 
+@patch("service.text_api.text_manager.process_document", create=True)
+def test_a_pdf_run_logs_pdfium_in_its_paradata(mock_process, tmp_path, monkeypatch):
+    """The API path logs the reader components the CLI logs (atrium-project#6, #72): a PDF read
+    by PDFium puts `pypdfium2` in the run's licence detail, as text_split.py always did."""
+    from atrium_paradata import ParadataLogger
+
+    monkeypatch.chdir(tmp_path)  # ParadataLogger writes ./paradata
+    logged = []
+    monkeypatch.setattr(ParadataLogger, "log_component", lambda self, name, license=None: logged.append(name))
+
+    def read(path, notes=None, components=None):
+        components.add("pypdfium2")
+        return json.loads(json.dumps(_DOC_RESULT))
+
+    mock_process.side_effect = read
+    response = client.post(
+        "/process", files={"file": ("x.pdf", b"%PDF-1.4", "application/pdf")}, data={"task_type": "document"}
+    )
+    assert response.status_code == 200, response.text
+    assert logged == ["pypdfium2"]
+
+
 @pytest.mark.parametrize("part, key", [("document_json", "document_json"), ("document_record", "document_json_out")])
 @patch("service.text_api.text_manager.process_alto", create=True)
 def test_a_seed_comes_back_accreted_under_the_name_it_was_sent_with(mock_process, part, key, tmp_path, monkeypatch):
