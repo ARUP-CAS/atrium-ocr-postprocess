@@ -180,7 +180,7 @@ decisions came back with it. What they settle, and what is left:
 | **Q3**  | ✅ Returned: 249 of 357 rows labelled. **Every blank is a line that is not Czech** (German, Latin, English), so the labels say nothing yet about German words such as `Dauerleihe`.                                                                                                                                                                       |
 | **Q4**  | ✅ `Clear`. Now set: every recognised web or e-mail address is `Clear`.                                                                                                                                                                                                                                                                                   |
 | **Q5a** | ⏳ @david-spacil will send the `[allowed]` entries as a small pull request.                                                                                                                                                                                                                                                                               |
-| **Q5b** | ⏳ Still open, and it matters for Q5a: a listed word today only stops counting against the line's score. Once the new rule is switched on, a listed word can still be the reason a line is discarded. If listing `Dauerleihe` should protect it from the new rule too, the answer to Q5b has to be *yes*.                                                 |
+| **Q5b** | ✅ *Yes, listed means never evidence of damage* (@david-spacil, 2026-10-01). Done: the new rule skips a listed word in every test, so it can never be the reason a line is discarded; the other words on the line are still read. Your Q5a entries take effect through both the score and the new rule.                                                   |
 | **Q6**  | ✅ Answered by the labels: **`Trash`**. About a third of what the new rule would discard is decipherable, but nothing the program can see tells those lines apart reliably — a line with one damaged word next to a clean one looked promising in the common text and failed in the rare text. Your fallback was "prefer `Trash`", so that is what stays. |
 
 **What your labels showed about the program**, beyond answering Q6:
@@ -197,8 +197,8 @@ decisions came back with it. What they settle, and what is left:
 
 ## ⏳ Still open — asked in the issue thread on 2026-09-22 (Q8: 2026-09-23)
 
-> **2026-10-01:** Q1–Q4 and Q6 are answered (above). Q5a waits on @david-spacil's pull request, Q5b
-> on an answer. The table below is kept as asked.
+> **2026-10-01:** Q1–Q6 are answered (above); Q5a's entries come with @david-spacil's pull request.
+> The table below is kept as asked.
 
 Posted after [comment 61](https://github.com/ufal/atrium-alto-postprocess/issues/30#issuecomment-5783543756)
 and numbered the same way there. Each needs a line; "no opinion" is an answer, and a blank is never

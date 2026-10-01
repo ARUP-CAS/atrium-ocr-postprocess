@@ -15,7 +15,7 @@ table anywhere in the repository. So the shipped configuration had no open-class
 protection at all. The file's `[allowed]` section is where that layer goes, not a
 duplicate of an existing one -- but it is not the layer yet: every entry ships
 commented out (which to switch on is Q5a), and an entry reaches the quality score
-only, not the witness's shape tests (whether it should is Q5b).
+and -- since Q5b was answered yes on 2026-10-01 -- the witness's shape tests.
 
 WHAT IS PINNED HERE. Mostly that the migration is a NO-OP: each list read from
 the file must equal the literal that was compiled into `text_util.py` before it.
@@ -163,11 +163,8 @@ def test_the_shipped_file_documents_every_section_it_defines():
 # [allowed] — the quality-score effect (#30)
 # ---------------------------------------------------------------------------
 #
-# The reach is deliberately narrow and deliberately provisional: a listed token
-# contributes nothing to the quality score, and nothing else. How much further it
-# should reach -- whether a listed word should also be immune to the short-line
-# rules outright -- is an open question for @DanaKriv and @david-spacil (issue #30
-# § 6), and until they answer it the code stops here.
+# A listed token contributes nothing to the quality score (below) and is never
+# evidence of damage to the shape witness (the Q5b section after it).
 
 
 def _armed(tmp_path, *tokens):
@@ -238,6 +235,44 @@ def test_matching_is_case_folded_but_does_not_fold_diacritics(tmp_path):
         assert tu._is_allowed_token("JÁMA") is True
         assert tu._is_allowed_token("Jáma") is True
         assert tu._is_allowed_token("jama") is False
+
+
+# ---------------------------------------------------------------------------
+# [allowed] — the shape witness (#30 Q5b)
+# ---------------------------------------------------------------------------
+#
+# @david-spacil, 2026-10-01, for himself and @DanaKriv: "yes, listed means never
+# evidence of damage". Before the answer, `ssuti vfetennl` went to `Trash` on
+# `ssuti`'s doubled first letter with `ssuti` listed (AT1, probed 2026-09-22).
+
+
+@pytest.mark.parametrize(
+    "token,clause",
+    [("ssuti", "initial_geminate"), ("Dauerleihe", "vowel_run"), ("Kaukasus", "low_variety")],
+)
+def test_a_listed_word_is_never_evidence_of_damage(tmp_path, token, clause):
+    assert clause in tu.shape_garbage_clauses(token), "premise: convicted before listing"
+    with _armed(tmp_path, token.lower()):
+        assert tu.shape_garbage_clauses(token) == []
+
+
+def test_a_listed_word_does_not_shield_the_rest_of_the_line(tmp_path):
+    """Veto only: the listed word stops being evidence, the others are still read."""
+    with _armed(tmp_path, "ssuti"):
+        assert tu.shape_garbage_clauses("ssuti") == []
+        assert tu.shape_garbage_clauses("ssuti oueussd") == ["vowel_run"]
+
+
+def test_the_listed_word_is_exempt_from_the_unattested_clause_too(tmp_path):
+    """`no_vocabulary` is the one clause that can add a conviction; a listed word
+    must not reach it either, lexicon or not."""
+    table = tmp_path / "df.tsv"
+    table.write_text("# documents\t10\nvrstva\t500\n", encoding="utf-8")
+    overrides = {"SHORT_GARBAGE_LEXICON_PATH": str(table), "SHORT_GARBAGE_LEXICON_CONVICT": True}
+    with tu.override_constants(overrides):
+        assert "no_vocabulary" in tu.shape_garbage_clauses("Hallstatthaus"), "premise"
+        with _armed(tmp_path, "hallstatthaus"):
+            assert tu.shape_garbage_clauses("Hallstatthaus") == []
 
 
 def test_the_short_line_penalty_makes_the_effect_a_cliff_not_a_weight_share(tmp_path):

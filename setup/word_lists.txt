@@ -37,10 +37,10 @@
 # score. It stops contributing to the "invalid word", "weird word", "gibberish"
 # and "fused word" measurements — it neither helps the score nor hurts it.
 #
-# WHAT IT DOES NOT DO, yet: it does not by itself stop the short-line rules from
-# convicting a line. How far a listed word should reach is an open question for
-# @DanaKriv and @david-spacil (issue #30 Q5b), and until they answer it this
-# section deliberately stops here.
+# AND (issue #30 Q5b, answered 2026-10-01: "yes, listed means never evidence of
+# damage"): the new short-line rule's shape tests skip it, so a listed word can
+# never be the reason a line is discarded. Other words on the same line are
+# still judged as before.
 #
 # THIS IS THE SECTION FOR ORDINARY WORDS the program keeps getting wrong: place
 # names, German and French museum vocabulary, Latin species names, old spellings,

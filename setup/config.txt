@@ -300,9 +300,9 @@ SHORT_GARBAGE_WITNESS_ENABLE            = false
 # EMPTY and no such table exists anywhere in this repository. So in the shipped
 # configuration there was no open-class protection at all. The `[allowed]` section
 # that fills the gap ships with every entry COMMENTED OUT (which to switch on is
-# Q5a), and an entry reaches the quality score only: the witness's shape tests
-# still read a listed word, so a mixed line can be convicted on it alone (whether
-# they should skip it is Q5b, open).
+# Q5a, @david-spacil's PR), and an entry reaches both the quality score and --
+# since Q5b was answered yes on 2026-10-01 -- the witness's shape tests, which
+# skip a listed word, so it can never be the reason a line is discarded.
 #
 # Every section in that file is a VETO: it can stop a conviction, never create
 # one. Relative paths resolve against text_util.py, not the working directory.

@@ -1259,3 +1259,17 @@ week, ≈ 2026-10-02). Recorded in the #30 digest and plan; nothing switched on.
   **12f flag A/B on Dana's lines** → 12g gold gate post-D46 → 12h exposure).
 
   **Not pushed: files delivered in chat.**
+
+## 2026-10-01 (later) — #30: `test` synced, Q5b answered and implemented
+
+* **Synced:** `origin/test` (`ac87fb2`, `d3e0a52`) carries the delivered #3 set; merged into the working branch with
+  `test`'s copies (table re-padding, `.gitignore` venv rename). Tree identical to `test` before the change below.
+* **What arrived:** Q5b — "yes, listed means never evidence of damage"; @david-spacil prepares the Q5a PR.
+* **Code:** `shape_garbage_clauses()` skips `[allowed]` tokens in every clause (`text_util.py`); `_is_allowed_token`
+  docstring, `setup/word_lists.txt` header and `setup/config.txt` comment say so; three tests in
+  `tests/test_word_lists.py`. Inert while `[allowed]` ships empty.
+* **Docs:** `docs/categorization_logic.md`, `docs/issue30/README.md`, digest R4, plan H12 + box table.
+* **Cluster:** `issue30_stage12_job.sh` pre-flight prints the active `[allowed]` entries, so a run made after the Q5a
+  PR says so in its own log.
+
+  **Not pushed: files delivered in chat.**

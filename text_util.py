@@ -1048,7 +1048,9 @@ def _is_allowed_token(core: str) -> bool:
     False for everything until an archive writes one, and every caller below is a
     no-op in the shipped configuration.
 
-    WHAT IT MEANS: the token contributes NOTHING to the line's quality score. It
+    WHAT IT MEANS, TWICE OVER. (1) The shape witness never reads it as evidence
+    of damage: `shape_garbage_clauses()` skips it (#30 Q5b, answered yes on
+    2026-10-01). (2) The token contributes NOTHING to the line's quality score. It
     stops counting toward the invalid-word, weird-word, gibberish and fused-word
     measurements -- which together are 0.60 of the score's weight. It does not
     count as a GOOD word either: `compute_valid_ratio` treats it as non-evaluable,
@@ -2713,6 +2715,18 @@ def shape_garbage_clauses(text_source: str, lang: str | None = None) -> list[str
             if len(letters) >= _TAXONOMIC_SUFFIX_MIN_ALPHA and _RE_TAXONOMIC_SUFFIX.search("".join(letters)):
                 continue
 
+            # LISTED BY THE ARCHIVE is exempt (#30 Q5b). @david-spacil, for
+            # himself and @DanaKriv, 2026-10-01: "yes, listed means never evidence
+            # of damage". A token in setup/word_lists.txt `[allowed]` is skipped by
+            # every clause below, `no_vocabulary` included, so it can never be the
+            # reason a line is discarded -- the step the list's header used to call
+            # deliberately not taken. Still a veto only: a listed word cannot
+            # convict anything, and an unlisted word on the same line is judged as
+            # before (`ssuti vfetennl` still fires, on `vfetennl` alone if at all).
+            # `[allowed]` ships empty, so this is a no-op until entries land.
+            if _is_allowed_token(core):
+                continue
+
             # ATTESTED VOCABULARY is exempt (#30 D14). Inert unless
             # SHORT_GARBAGE_LEXICON_PATH points at a built table, so this is a
             # no-op in the shipped configuration. This is what reaches the loans
@@ -2766,9 +2780,9 @@ def shape_garbage_clauses(text_source: str, lang: str | None = None) -> list[str
             # A doubled CONSONANT in first position: `Tthts`, `rragment`. Rare in
             # European orthography but NOT impossible: abbreviations and old
             # spellings open that way -- `ppole` (*popelnicová pole*) and `ssuti`
-            # (old *suť*) are real words this clause convicts (#30 W2). Only an
-            # attesting table spares them today; an `[allowed]` entry does not
-            # reach this function (Q5b). A bare `^(.)\1` would also take `Aachen`.
+            # (old *suť*) are real words this clause convicts (#30 W2). An
+            # attesting table spares them, and since Q5b so does an `[allowed]`
+            # entry (the veto above). A bare `^(.)\1` would also take `Aachen`.
             if _RE_INITIAL_CONSONANT_GEMINATE.match(core):
                 found.add("initial_geminate")
 
