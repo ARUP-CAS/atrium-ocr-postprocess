@@ -53,6 +53,7 @@ how to fill them in. Read it together with the guide rather than on its own.
 | `census.csv` | 157 rows. The most common text at risk, every string the program currently answers in two different ways, and 39 checks. **Ready to work on.**                                 |
 | `sample.csv` | 200 rows. A random selection from the long tail of rare text. Ready to work on.                                                                                                |
 | `frame.json` | A small technical file recording how `sample.csv` was chosen. **It must come back with the answers**, or those 200 rows cannot be turned into a figure. Please do not edit it. |
+| `answers/2026-10-01/` | ✅ **@DanaKriv's answers**, returned 2026-10-01 via @david-spacil (`anotace_Dana.zip`): the same three files with `gold_categ` filled. Kept beside the blank request rather than over it. |
 
 In `census.csv` and `sample.csv` there are three empty columns: `gold_categ`, `confidence` and
 `note`. Those are the ones to fill in. Everything else is there to help you decide.
@@ -164,7 +165,37 @@ also open** — Q5 (a) below.
 
 ---
 
+## ✅ 2026-10-01 — the answers are in
+
+@david-spacil summarised what he and @DanaKriv agreed after the 30 September meeting, and the 357
+decisions came back with it. What they settle, and what is left:
+
+| #       | answer                                                                                                                                                                                                                                                                                                                                               |
+|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Q1**  | ✅ Agreed: `Trash` = illegible, decipherable = `Noisy`, usefulness does not count.                                                                                                                                                                                                                                                                   |
+| **Q2**  | ✅ The de-duplication step stays as it is.                                                                                                                                                                                                                                                                                                            |
+| **Q3**  | ✅ Returned: 249 of 357 rows labelled. **Every blank is a line that is not Czech** (German, Latin, English), so the labels say nothing yet about German words such as `Dauerleihe`.                                                                                                                                                                   |
+| **Q4**  | ✅ `Clear`. Now set: every recognised web or e-mail address is `Clear`.                                                                                                                                                                                                                                                                              |
+| **Q5a** | ⏳ @david-spacil will send the `[allowed]` entries as a small pull request.                                                                                                                                                                                                                                                                         |
+| **Q5b** | ⏳ Still open, and it matters for Q5a: a listed word today only stops counting against the line's score. Once the new rule is switched on, a listed word can still be the reason a line is discarded. If listing `Dauerleihe` should protect it from the new rule too, the answer to Q5b has to be *yes*.                                            |
+| **Q6**  | ✅ Answered by the labels: **`Trash`**. About a third of what the new rule would discard is decipherable, but nothing the program can see tells those lines apart reliably — a line with one damaged word next to a clean one looked promising in the common text and failed in the rare text. Your fallback was "prefer `Trash`", so that is what stays. |
+
+**What your labels showed about the program**, beyond answering Q6:
+
+* The new rule, switched on, would fix most of what it touches: in the rare text it takes the
+  estimated mistakes from about 4,800 lines to about 1,200, and it discards **none** of the lines
+  you marked `Clear`.
+* That last part needed one correction first. The rule used to read words joined by a comma or a
+  slash without a space — `gut erhalten,Siedelungsfund,gefunden` — as one long word, and judge it
+  as damage. Your only two `Clear` lines in the at-risk set, `XXX,1937,str. 21` and
+  `okraj sekt.III,konec`, were exactly that. It now reads them word by word.
+* The rule is still switched off. The last check before switching it on is a re-run on the cluster
+  that scores it against your labels on the real lines.
+
 ## ⏳ Still open — asked in the issue thread on 2026-09-22 (Q8: 2026-09-23)
+
+> **2026-10-01:** Q1–Q4 and Q6 are answered (above). Q5a waits on @david-spacil's pull request, Q5b
+> on an answer. The table below is kept as asked.
 
 Posted after [comment 61](https://github.com/ufal/atrium-alto-postprocess/issues/30#issuecomment-5783543756)
 and numbered the same way there. Each needs a line; "no opinion" is an answer, and a blank is never

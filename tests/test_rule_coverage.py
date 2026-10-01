@@ -602,12 +602,21 @@ def test_config_gated_rules_are_registered_and_real():
         # The gate is TRUTHINESS, not a bool. `rule_is_config_gated_off` reads
         # `not bool(...)`, and a gate that names an answer rather than a switch is
         # the more useful shape where the answer is itself the open question:
-        # DOMAIN_NOTATION_CATEG holds a category name and ships empty (#30 D43).
-        # What must hold is that the shipped value is falsy -- a gated rule whose
-        # flag ships ON is not gated, it is armed, and this registry would then be
-        # telling rule_coverage_report the opposite of the truth.
-        assert not getattr(tu, flag), f"{flag} gates {rule} but does not ship off"
-        assert tu.rule_is_config_gated_off(rule), f"{rule} should read as gated off at the shipped config"
+        # DOMAIN_NOTATION_CATEG holds a category name (#30 D43). It shipped empty
+        # until Q4 was answered on 2026-10-01 and ships `Clear` now -- ARMED, yet
+        # still correctly registered, because the gate is read live: an armed
+        # gated rule is classified on its own counts like any other. What must
+        # hold is that the classifier's answer follows the flag.
+        armed = bool(getattr(tu, flag))
+        assert tu.rule_is_config_gated_off(rule) is (not armed), f"{rule}'s gate disagrees with {flag}"
+
+
+def test_which_gated_rules_ship_armed():
+    """The shipped state of each gated flag, pinned so that flipping one is a visible decision."""
+    assert tu.SHORT_GARBAGE_WITNESS_ENABLE is False
+    assert tu.rule_is_config_gated_off("rule_short_garbage_witness")
+    assert tu.DOMAIN_NOTATION_CATEG == "Clear"  # #30 Q4, 2026-10-01
+    assert not tu.rule_is_config_gated_off("rule_domain_notation_categ")
 
 
 def test_the_witness_is_inert_not_dead_at_the_shipped_configuration():

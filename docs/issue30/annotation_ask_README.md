@@ -1,5 +1,15 @@
 # Issue #30 — the annotation request
 
+> ## ✅ Returned — 2026-10-01
+>
+> @DanaKriv's answers are in [`answers/2026-10-01/`](answers/2026-10-01/): 249 of the 357 rows
+> labelled, every blank a line that is not Czech. What they say is summarised in
+> [`README.md`](README.md) § "2026-10-01 — the answers are in"; the figures are reproduced by
+> `python tools/project_annotation.py report --census docs/issue30/answers/2026-10-01/census.csv
+> --sample docs/issue30/answers/2026-10-01/sample.csv --frame docs/issue30/answers/2026-10-01/frame.json`
+> from the repository root.
+> The files below are the request as it was sent and are not edited.
+
 > ## ✅ These files are ready — 2026-09-22
 >
 > **The earlier hold is lifted.** The previous version of this request was built from the wrong

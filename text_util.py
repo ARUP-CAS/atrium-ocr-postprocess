@@ -2255,6 +2255,14 @@ def _has_strong_garbage_evidence(
 # waits on the annotation ask (docs/issue30/census.csv + sample.csv) and the open
 # questions in docs/issue30/README.md, not on code.
 #
+# UPDATE 2026-10-01 -- the annotation is back (docs/issue30/answers/2026-10-01/,
+# 249 of 357 rows labelled, every blank non-Czech). Text-only with this
+# predicate and no lexicon: projected tail errors 4,844 -> 1,180, census head
+# 339 -> 358 (decipherable damage, which this route answers `Trash`; Q6 keeps
+# that), `Clear`-loss 0 -- after D46 below, which her two `Clear` labels found.
+# The flag stays false until stage 12 scores the same labels on the real lines
+# with the lexicon armed (tools/project_annotation.py join).
+#
 # The annotations themselves are now here -- tools/gold/sidecars/, joined onto a
 # delivered batch with `--gold-sidecar`; see tools/gold/GOLD.md, including its
 # provenance note on the 55 labels that changed when the 508 were re-annotated.
@@ -2319,6 +2327,36 @@ _TAXONOMIC_SUFFIX_MIN_ALPHA: int = 5
 # restored with it: the D44 language split now overlaps it, and it needs its own
 # measurement (30.plan.md D45).
 _RE_FUSED_GRID_REF: re.Pattern = re.compile(r"^[A-Za-z]{1,3}[-/][IVXLCDM]{1,7}[a-z]?$")
+
+# (#30 D46) Punctuation that joins two words without a space. `_split_subtokens`
+# splits on `. - –` only, so the witness used to read a comma-list such as
+# `erhalten,Siedelungsfund,gefunden` as ONE 30-letter token. On a token that long
+# `low_variety` fires on alphabet saturation alone -- a long string simply runs
+# out of new letters -- and a roman numeral fused by a comma (`XXX,1937,str`,
+# `III,konec`) no longer looks like a roman numeral to `_RE_ROMAN_TOKEN`.
+#
+# Found in @DanaKriv's 357 decisions (2026-10-01, docs/issue30/answers/): the only
+# two at-risk lines she labelled `Clear` are exactly these, `XXX,1937,str. 21`
+# and `okraj sekt.III,konec`, and 41 of the rows she left blank -- readable German
+# find descriptions -- fired only because of a fused comma or slash. Splitting
+# here, measured on her labels with this predicate: projected tail errors
+# 1,282 -> 1,180, projected `Clear`-loss 102 -> 0, one gold-`Trash` row lost
+# (`MZMRISCH,IEU Stxdter`, whose `IEU` drops below MIN_ALPHA once separated).
+#
+# WITNESS-LOCAL, like the exemptions above: `_split_subtokens` also feeds the
+# quality metrics, so changing it would move `quality_score` on every line in the
+# corpus. The lexicon builder and `tools/ocr_neighbours.py` use this splitter too,
+# because a table keyed differently from the lookup misses silently.
+_RE_WITNESS_JOINERS: re.Pattern = re.compile(r"[,/;:()\[\]{}<>\"„“”«»=_?!*#]+")
+
+
+def _witness_subtokens(word: str) -> list[str]:
+    """Split one whitespace token the way the shape witness reads it (#30 D46).
+
+    Joining punctuation first (`_RE_WITNESS_JOINERS`), then `_split_subtokens`'s
+    `. - –`. Empty pieces are dropped.
+    """
+    return [sub for piece in _RE_WITNESS_JOINERS.split(word) for sub in _split_subtokens(piece)]
 
 
 @functools.lru_cache(maxsize=8)
@@ -2609,7 +2647,7 @@ def shape_garbage_clauses(text_source: str, lang: str | None = None) -> list[str
 
     found: set[str] = set()
     for word in text_source.split():
-        for sub in _split_subtokens(word):
+        for sub in _witness_subtokens(word):
             core = sub.strip(_STRIP_CHARS)
             letters = [c for c in core if c.isalpha()]
 

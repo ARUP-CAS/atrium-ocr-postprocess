@@ -356,7 +356,7 @@ class OCRNeighbours:
         """
         detail: list[tuple[str, str]] = []
         for word in text.split():
-            for sub in tu._split_subtokens(word):
+            for sub in tu._witness_subtokens(word):
                 core = sub.strip(tu._STRIP_CHARS).lower()
                 if core and sum(c.isalpha() for c in core) >= DEFAULT_MIN_ALPHA:
                     detail.append((core, self.token_status(core)))
@@ -434,7 +434,7 @@ def cmd_lookup(nb: OCRNeighbours, tokens: list[str]) -> int:
     print(f"  {'-' * 24} {'-' * 12} {'-' * 44}")
     for raw in tokens:
         for word in raw.split():
-            for sub in tu._split_subtokens(word):
+            for sub in tu._witness_subtokens(word):
                 core = sub.strip(tu._STRIP_CHARS).lower()
                 if not core:
                     continue

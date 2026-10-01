@@ -56,8 +56,11 @@ a redaction pass, the same discipline ``tools/issue30_perplex_report.py`` follow
 
 Tokenisation is imported from ``text_util``, never reimplemented. Four separate
 harness divergences in this repository came from a tool carrying its own copy of
-logic that then moved; the table has to be built with the same ``_split_subtokens``
+logic that then moved; the table has to be built with the same ``_witness_subtokens``
 and ``_STRIP_CHARS`` the predicate looks tokens up with, or lookups silently miss.
+(#30 D46, 2026-10-01: the witness now also splits on joining punctuation such as
+``,`` and ``/``, so a table built before D46 keys comma-fused strings the predicate
+no longer looks up. Rebuild it.)
 
 Usage
 -----
@@ -108,14 +111,15 @@ DEFAULT_MIN_ALPHA = 4
 def iter_tokens(text: str):
     """Yield lookup-normalised tokens from one line, exactly as the predicate does.
 
-    Mirrors ``text_util.shape_garbage_clauses``: split on whitespace, then on
-    ``. - –`` via ``_split_subtokens``, strip ``_STRIP_CHARS``, lowercase. Any
+    Mirrors ``text_util.shape_garbage_clauses``: split on whitespace, then via
+    ``_witness_subtokens`` (joining punctuation, then ``. - –``), strip
+    ``_STRIP_CHARS``, lowercase. Any
     divergence here is a table whose keys the predicate cannot find, which fails
     silently as "no vocabulary support" -- i.e. as a witness that convicts more,
     which is the direction that costs real lines.
     """
     for word in text.split():
-        for sub in tu._split_subtokens(word):
+        for sub in tu._witness_subtokens(word):
             core = sub.strip(tu._STRIP_CHARS)
             if core:
                 yield core.lower()

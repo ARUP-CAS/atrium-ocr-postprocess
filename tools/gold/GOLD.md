@@ -257,3 +257,38 @@ The sidecar makes the objective non-circular. It does not make it complete:
 `SWEEP_NOTES.md`'s standing warning — *do not adopt `best_config.json` blindly* —
 still applies. A 2,067-line sidecar over 816 documents is enough to tell an
 improvement from a regression; it is not enough to fit constants against.
+
+## The third set — a returned annotation ask (2026-10-01)
+
+@DanaKriv's 357 decisions are **string-level**, not line-level: `census.csv` and
+`sample.csv` rows each settle every line carrying a spelling family, and
+`frame.json` says what each sampled row stands for. They live in
+`docs/issue30/answers/2026-10-01/`, not here, because they carry no locators.
+
+`tools/project_annotation.py` turns them into what this file describes:
+
+```bash
+# What the labels say, projected through the frame (text only, seconds)
+python tools/project_annotation.py report \
+    --census docs/issue30/answers/2026-10-01/census.csv \
+    --sample docs/issue30/answers/2026-10-01/sample.csv \
+    --frame  docs/issue30/answers/2026-10-01/frame.json
+
+# A (file, page_num, line_num) sidecar over the archives the ask was cut from,
+# plus the list of documents to stage for ab_constant_eval.py
+python tools/project_annotation.py join \
+    --census ... --sample ... \
+    --corpus ../ARUP/DOC_LINE_CATEG_307 --corpus ../ARUB/DOC_LINE_CATEG_307 --recursive \
+    --out issue30_stage12_out/12b_dana_sidecar.csv --docs-out issue30_stage12_out/12b_docs.txt
+```
+
+The join matches on text alone — exact spelling, each listed variant, then the
+spelling family — and **not** through the witness report's `--from-distinct`,
+which only labels lines the witness fires on now. A predicate change that stops
+it firing on a labelled line would otherwise drop that line from the sidecar, and
+the A/B would never see the change it is meant to measure (#30 D46 did exactly
+that to both of her `Clear` lines).
+
+Two cautions. The sidecar counts every joined line once; the frame weights live
+only in the `report` output. And every blank in this return is a non-Czech line,
+so neither the sidecar nor the projection says anything about German text.

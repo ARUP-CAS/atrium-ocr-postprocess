@@ -12,10 +12,11 @@ already moved it `Trash` -> `Noisy`, the right direction and one step short.
 `DOMAIN_NOTATION_CATEG` is a CATEGORY NAME, not an on/off switch, because this
 one line has had three different answers inside this issue and a fourth is
 defensible. Settling it should be a config edit and a re-score, not a code change
-per answer. It ships EMPTY, which is off.
+per answer. It shipped EMPTY (off) until 2026-10-01, when @david-spacil and
+@DanaKriv answered Q4: `Clear`.
 
-What is asserted here is the WIRING and the BOUNDARIES: that empty changes
-nothing, that every valid value is honoured, that an invalid value fails loudly
+What is asserted here is the WIRING and the BOUNDARIES: that the shipped value
+is the answer given, that empty is off, that every valid value is honoured, that an invalid value fails loudly
 rather than silently doing nothing, that the route reaches LONG addresses and not
 only short ones, and that it does not touch lines carrying no address.
 """
@@ -60,17 +61,25 @@ def _categ(text: str, *, perplexity: float = 900.0) -> str:
     )["categ"]
 
 
-@pytest.mark.parametrize("text", ADDRESSES + NOT_ADDRESSES)
-def test_the_shipped_empty_value_changes_nothing(text):
-    """The default is off, and off means the cascade decides as it always did.
+def test_the_shipped_value_is_the_q4_answer():
+    """Q4, answered 2026-10-01 by @david-spacil and @DanaKriv: `Clear`."""
+    import text_util as tu
 
-    Pinned by comparing the shipped config against DOMAIN_NOTATION_CATEG="" set
-    explicitly, so the test says "empty is off" rather than "the default is the
-    default".
-    """
-    before = _categ(text)
+    assert tu.DOMAIN_NOTATION_CATEG == "Clear"
+
+
+@pytest.mark.parametrize("text", ADDRESSES)
+def test_every_address_is_clear_at_the_shipped_config(text):
+    assert _categ(text) == "Clear"
+
+
+@pytest.mark.parametrize("text", ADDRESSES + NOT_ADDRESSES)
+def test_empty_is_off(text):
+    """Empty still means the cascade decides as it did before the route existed."""
     with override_constants({"DOMAIN_NOTATION_CATEG": ""}):
-        assert _categ(text) == before
+        with rule_fire_capture() as counts:
+            _categ(text)
+    assert counts.get("rule_domain_notation_categ", 0) == 0
 
 
 @pytest.mark.parametrize("categ", ["Clear", "Noisy", "Trash", "Non-text"])
@@ -99,7 +108,8 @@ def test_it_reaches_a_line_the_hard_sweep_would_otherwise_take():
     rule for the addresses the sweep happened to leave alone.
     """
     citation = "roku 1820 (http://www.hrady.cz/index.php?OID=1291)."
-    assert _categ(citation, perplexity=5000.0) == "Trash"
+    with override_constants({"DOMAIN_NOTATION_CATEG": ""}):
+        assert _categ(citation, perplexity=5000.0) == "Trash"
     with override_constants({"DOMAIN_NOTATION_CATEG": "Clear"}):
         assert _categ(citation, perplexity=5000.0) == "Clear"
 
@@ -148,8 +158,9 @@ def test_a_valid_category_imports_cleanly_from_the_environment():
 
 def test_the_rule_name_fires_only_when_a_category_is_configured():
     """Coverage and ablation must see the site, not just its absence."""
-    with rule_fire_capture() as counts:
-        _categ("http://www.arub.cz")
+    with override_constants({"DOMAIN_NOTATION_CATEG": ""}):
+        with rule_fire_capture() as counts:
+            _categ("http://www.arub.cz")
     assert counts.get("rule_domain_notation_categ", 0) == 0
 
     with override_constants({"DOMAIN_NOTATION_CATEG": "Clear"}):

@@ -1234,3 +1234,28 @@ week, ≈ 2026-10-02). Recorded in the #30 digest and plan; nothing switched on.
   `tools/ci/image_closure.py`; `docker.yml` names `api` as the production target. Revendored the three
   declared-rename files — the rule #56 needs (`attach_openapi_contract(..., previous="alto-postprocess")` at the rename).
 * Tag draft: `v1.7.0-beta`. **Not pushed: files delivered in chat.**
+
+## 2026-10-01 — #30 (now atrium-ocr-postprocess#3): @DanaKriv's 357 decisions returned
+
+* **What arrived:** @david-spacil's 2026-10-01 09:52 comment — Q1 ✅, Q2 ✅, Q4 `Clear`, Q5 a PR to follow, Q6
+  "wait for the annotation, else `Trash`" — and `anotace_Dana.zip`: the ask's `census.csv` / `sample.csv` /
+  `frame.json` with `gold_categ` filled (249 of 357; every blank a non-Czech line). Stored as
+  `docs/issue30/answers/2026-10-01/`.
+* **Found:** D46 — the shape witness read comma- and slash-joined words as one token; both of Dana's at-risk `Clear`
+  labels and 41 readable German blanks fired only because of it. Fixed witness-locally; the lexicon builder and
+  `ocr_neighbours` follow, so the cluster table must be rebuilt.
+* **Decided by measurement:** Q6 stays `Trash` — a companion-word grade helps the census head (358 → 275) and hurts
+  the tail (1,180 → 1,636).
+* **Code:** `text_util.py` (D46), `setup/config.txt` (Q4 `Clear`), `tools/project_annotation.py` (new: `report`,
+  `join`), `tools/short_garbage_witness_report.py` (`--from-distinct` repeatable, family-aware),
+  `tools/build_token_lexicon.py`, `tools/ocr_neighbours.py`; tests: `test_witness_fused_tokens.py`,
+  `test_project_annotation.py`, domain-notation / rule-coverage / pipeline-parity / witness-report / vocabulary
+  updates, golden +1 edge case. Suite 1,893 passed / 13 skipped / 2 xfailed; `ruff` clean; `data_samples` re-score
+  moves 0.
+* **Dev logs:** `30.*` 📬 new top sections (digest R0–R5; plan box status, D46, stage 12 and its flip rule; H1–H3,
+  H9–H11, H13 status cells). `docs/issue30/README.md`, `annotation_ask_README.md`, `docs/categorization_logic.md`,
+  `tools/gold/GOLD.md` in step.
+* **Cluster:** `issue30_stage12_job.sh` (12a lexicon → 12b join → 12c stage → 12d preflight → 12e projection →
+  **12f flag A/B on Dana's lines** → 12g gold gate post-D46 → 12h exposure).
+
+  **Not pushed: files delivered in chat.**

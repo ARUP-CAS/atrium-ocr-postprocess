@@ -185,6 +185,51 @@ def test_reads_a_doc_line_categ_csv_and_writes_candidates(tmp_path):
     assert rows[0]["gold_categ"] == "", "gold column must ship blank so it can be filled blind"
 
 
+def test_from_distinct_reads_a_returned_census_and_repeats(tmp_path):
+    """(#30, 2026-10-01) The returned ask is family-shaped and lower-case.
+
+    `census.csv` rows carry a representative `text` plus every spelling in
+    `variants`, and @DanaKriv's labels came back as `trash` / `noisy`. The old
+    reader matched `text` exactly and passed the label through verbatim, so a
+    variant spelling stayed unlabelled and `trash` was not `Trash`.
+    """
+    src = tmp_path / "CTX000000000.csv"
+    with src.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["file", "page_num", "line_num", "categ", "text", "word_count"])
+        writer.writerow(["CTX000000000", "1", "1", "Clear", "oueussd", "1"])
+        writer.writerow(["CTX000000000", "1", "2", "Clear", "Oueussd .", "2"])
+        writer.writerow(["CTX000000000", "1", "3", "Noisy", "OUUITN", "1"])
+
+    header = ["text", "variants", "lines_settled", "tranche", "stratum", "categ_current", "gold_categ"]
+    census = tmp_path / "census.csv"
+    with census.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(header)
+        writer.writerow(["oueussd", "oueussd | Oueussd .", "2", "census_head", "at_risk/none", "Clear:2", "trash"])
+    sample = tmp_path / "sample.csv"
+    with sample.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(header)
+        writer.writerow(["OUUITN", "OUUITN", "1", "sample_tail", "at_risk/none", "Noisy:1", "Trash"])
+
+    out = tmp_path / "candidates.csv"
+    assert R.main([str(src), "--out", str(out), "--from-distinct", str(census), "--from-distinct", str(sample)]) == 0
+    labels = {r["text"]: r["gold_categ"] for r in csv.DictReader(out.open(encoding="utf-8"))}
+    assert labels == {"oueussd": "Trash", "Oueussd .": "Trash", "OUUITN": "Trash"}
+
+
+def test_from_distinct_refuses_an_unknown_label(tmp_path):
+    src = tmp_path / "CTX000000000.csv"
+    with src.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(["categ", "text", "word_count"])
+        writer.writerow(["Clear", "oueussd", "1"])
+    filled = tmp_path / "filled.csv"
+    filled.write_text("text,gold_categ\noueussd,rubbish\n", encoding="utf-8")
+    assert R.main([str(src), "--out", str(tmp_path / "o.csv"), "--from-distinct", str(filled)]) == 2
+
+
 def test_plain_lines_mode(tmp_path):
     probe = tmp_path / "probe.txt"
     probe.write_text("oueussd\nmalakofauna\n\n", encoding="utf-8")

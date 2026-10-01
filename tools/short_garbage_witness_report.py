@@ -464,22 +464,27 @@ def _band(n: int) -> str:
     return "100+"
 
 
-def _read_filled_distinct(path: Path) -> dict[str, str]:
-    """Read a filled --distinct file into {text: gold_categ}, skipping blanks."""
-    with path.open(encoding="utf-8", errors="replace", newline="") as handle:
-        reader = csv.DictReader(handle)
-        missing = [c for c in ("text", "gold_categ") if c not in (reader.fieldnames or [])]
+def _read_filled_distinct(paths: list[Path]):
+    """Read one or more FILLED queues into a lookup, skipping blanks.
+
+    Delegates to ``tools/project_annotation.py`` so there is one reader of a
+    returned ask, not two. That reader also takes the census/sample shape
+    (``variants`` joined by ``" | "``, family rows) and validates the labels --
+    `trash` and `Trash` are the same answer, a typo stops the run. (#30, the
+    2026-10-01 return used lower-case labels throughout.)
+    """
+    from tools.project_annotation import read_decisions
+
+    for path in paths:
+        with path.open(encoding="utf-8", errors="replace", newline="") as handle:
+            fields = csv.DictReader(handle).fieldnames or []
+        missing = [c for c in ("text", "gold_categ") if c not in fields]
         if missing:
             raise ValueError(
                 f"{path} has no {', '.join(missing)} column, so it is not a filled --distinct "
                 "file. Generate one with --distinct, fill gold_categ, then pass it here."
             )
-        out = {}
-        for row in reader:
-            label = (row.get("gold_categ") or "").strip()
-            if label:
-                out[row["text"]] = label
-    return out
+    return read_decisions(paths)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -517,10 +522,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--from-distinct",
         metavar="PATH",
+        action="append",
+        default=[],
         help=(
             "Read a FILLED --distinct file and project its gold_categ onto every line carrying "
             "that string, writing the result to --out as a joinable sidecar. This is the step "
-            "that turns string-level decisions back into (file, page_num, line_num) rows."
+            "that turns string-level decisions back into (file, page_num, line_num) rows. "
+            "Repeatable, and it also reads a returned census.csv / sample.csv (variants and "
+            "spelling families). It only labels lines the witness fires on NOW; for a sidecar "
+            "that survives a predicate change use `tools/project_annotation.py join`."
         ),
     )
     parser.add_argument(
@@ -764,19 +774,24 @@ def main(argv: list[str] | None = None) -> int:
         out_path = Path(args.out)
         if _refuses_gold_dir(out_path, "--out"):
             return 2
-        projected: dict[str, str] = {}
+        projected = None
         if args.from_distinct:
             try:
-                projected = _read_filled_distinct(Path(args.from_distinct))
+                projected = _read_filled_distinct([Path(p) for p in args.from_distinct])
             except (OSError, ValueError) as exc:
                 print(f"error: {exc}", file=sys.stderr)
                 return 2
-            covered = sum(1 for _, v, _ in witnessed_rows if v["text"] in projected)
+            covered = sum(1 for _, v, _ in witnessed_rows if projected.lookup(v["text"]) is not None)
             print(
-                f"\nprojecting {len(projected)} annotated string(s) from {args.from_distinct} "
+                f"\nprojecting {len(projected.labelled)} annotated row(s) from {', '.join(args.from_distinct)} "
                 f"onto {covered} of {len(witnessed_rows)} lines "
                 f"({covered / len(witnessed_rows) if witnessed_rows else 0:.1%} covered)"
             )
+
+        def _label(text: str) -> str:
+            hit = projected.lookup(text) if projected is not None else None
+            return hit.label if hit is not None else ""
+
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with out_path.open("w", newline="", encoding="utf-8") as handle:
             writer = csv.writer(handle)
@@ -806,7 +821,7 @@ def main(argv: list[str] | None = None) -> int:
                         verdict["word_count"],
                         categ,
                         verdict["clauses"],
-                        projected.get(verdict["text"], ""),
+                        _label(verdict["text"]),
                     ]
                 )
         print(f"\nwrote {len(witnessed_rows)} candidate lines to {out_path}")

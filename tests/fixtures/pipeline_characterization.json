@@ -86,6 +86,14 @@
         "rule_short_line"
       ]
     ],
+    "domain_notation_categ_address": [
+      "Clear",
+      0.8,
+      "clear_threshold",
+      [
+        "rule_domain_notation_categ"
+      ]
+    ],
     "short_garbage_vocabulary_without_strong_evidence": [
       "Clear",
       0.8,

@@ -483,7 +483,7 @@ def test_builder_tokenisation_matches_the_predicate_lookup():
     witness that convicts MORE. That is the direction that costs real lines, and
     nothing in the output would say so. Four harness divergences in this
     repository came from a tool carrying its own copy of text_util logic; the
-    builder imports `_split_subtokens` and `_STRIP_CHARS` for that reason.
+    builder imports `_witness_subtokens` and `_STRIP_CHARS` for that reason.
     """
     import importlib.util
 
@@ -491,13 +491,20 @@ def test_builder_tokenisation_matches_the_predicate_lookup():
     btl = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(btl)
 
-    for line in ["radius prox.sin.", "Reg.Bez.Aussig.", "Equus caballus", "Sonda VIII/3", "0,2-0,4 m"]:
+    for line in [
+        "radius prox.sin.",
+        "Reg.Bez.Aussig.",
+        "Equus caballus",
+        "Sonda VIII/3",
+        "0,2-0,4 m",
+        "gut erhalten,Siedelungsfund,gefunden",
+    ]:
         built = list(btl.iter_tokens(line))
         # The predicate's own path, reproduced from the same helpers.
         expected = [
             core.lower()
             for word in line.split()
-            for sub in tu._split_subtokens(word)
+            for sub in tu._witness_subtokens(word)
             if (core := sub.strip(tu._STRIP_CHARS))
         ]
         assert built == expected, f"{line!r}: builder {built} != predicate {expected}"

@@ -112,16 +112,6 @@ UNREACHABLE_RULES: dict[str, str] = {
         "tools/gold/GOLD.md), delete this entry and add a real edge case instead. "
         "tests/test_short_garbage_witness_wiring.py covers the flag-on behaviour."
     ),
-    "rule_domain_notation_categ": (
-        "(#30 D43) The web/e-mail route runs first in the cascade but reads "
-        "DOMAIN_NOTATION_CATEG, which ships EMPTY -- what a legible address is worth is "
-        "@DanaKriv's and @david-spacil's to settle, and the key is a category name so "
-        "that settling it is a config edit rather than a code change. EDGE_CASES run at "
-        "the default config, so this name cannot fire here. Unreachable BY "
-        "CONFIGURATION, like rule_short_garbage_witness above and unlike "
-        "rule_mid_uppercase below. When a category is configured, delete this entry and "
-        "add a real edge case. tests/test_domain_notation_categ.py covers every value."
-    ),
     "rule_mid_uppercase": (
         "Gate 9d requires word_count <= 2, but gate 7 (rule_short_line) has the same "
         "condition and always returns first, so 9d is shadowed. See "
@@ -239,6 +229,24 @@ EDGE_CASES: list[tuple[str, dict]] = [
             lang_score=0.50,
             orig_lang_score=0.50,
             weird_ratio=0.6,
+            gibberish_present=True,
+        ),
+    ),
+    # Gate 0b. (#30 Q4, 2026-10-01) DOMAIN_NOTATION_CATEG ships `Clear`, so a
+    # recognised address takes that category before any word-likeness signal is
+    # read. Same hostile signals as above: the route must win over all of them.
+    (
+        "domain_notation_categ_address",
+        dict(
+            qs=0.25,
+            txt="http://www.arub.cz",
+            wc=1,
+            vowel_ratio=0.20,
+            perplexity=5000.0,
+            valid_word_ratio=0.0,
+            lang_score=0.50,
+            orig_lang_score=0.50,
+            weird_ratio=1.0,
             gibberish_present=True,
         ),
     ),

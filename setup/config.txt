@@ -282,6 +282,9 @@ ISOLATED_CHAR_MIN_TOKENS    = 3
 # text_util prints an advisory if you set this without SHORT_GARBAGE_LEXICON_PATH
 # -- advisory, not fatal, because the shape-only configuration is measured on
 # purpose (every gold A/B from stage 5a on, and the 508 re-check).
+# 2026-10-01: @DanaKriv's 357 decisions support arming it (projected at-risk
+# errors 4,844 -> 1,180 in the tail, no labelled `Clear` lost after D46). Still
+# false until stage 12 scores them on the real lines with a lexicon.
 SHORT_GARBAGE_WITNESS_ENABLE            = false
 # (#30) The hand-maintained word lists. THIS IS THE FILE FOR PEOPLE WHO KNOW THE
 # MATERIAL: units, reference labels, section headings, and -- the section that did
@@ -328,7 +331,10 @@ WORD_LISTS_PATH                         = setup/word_lists.txt
 # EMPTY = off, and the cascade decides as it does today. Valid: Clear, Noisy,
 # Trash, Non-text, Empty. An unrecognised value fails at import rather than
 # silently doing nothing.
-DOMAIN_NOTATION_CATEG                   =
+# SET 2026-10-01 (#30 Q4): @david-spacil and @DanaKriv answered `Clear`, after
+# @DanaKriv agreed the `Trash` = illegible definition (Q1). The known limit above
+# is accepted with it: a damaged address is rated `Clear` too.
+DOMAIN_NOTATION_CATEG                   = Clear
 # Minimum ALPHABETIC characters in a sub-token before any shape test applies.
 # Also what keeps every SHORT_VALID_WORDS / _NEUTRAL_LEXICON member out by
 # construction (`se`, `po`, `mm`, `ks` are all shorter than this).
