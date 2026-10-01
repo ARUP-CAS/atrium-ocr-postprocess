@@ -54,14 +54,14 @@ Usage
 ::
 
     python tools/project_annotation.py report \\
-        --census docs/issue30/answers/2026-10-01/census.csv \\
-        --sample docs/issue30/answers/2026-10-01/sample.csv \\
-        --frame  docs/issue30/answers/2026-10-01/frame.json
+        --census docs/issue30/census.csv \\
+        --sample docs/issue30/sample.csv \\
+        --frame  docs/issue30/frame.json
 
     python tools/project_annotation.py join \\
         --census ... --sample ... \\
-        --corpus ../ARUP/DOC_LINE_CATEG_307 --corpus ../ARUB/DOC_LINE_CATEG_307 --recursive \\
-        --out issue30_stage12_out/12a_dana_sidecar.csv --docs-out issue30_stage12_out/12a_docs.txt
+        --corpus ../ARUP/DOC_LINE_CATEG_307 --corpus ../ARUB/DOC_LINE_CATEG_307 \\
+        --out issue30_stage12_out/12b_dana_sidecar.csv --docs-out issue30_stage12_out/12b_docs.txt
 """
 
 from __future__ import annotations
@@ -142,8 +142,12 @@ class Decision:
 
 
 def read_ask(path: Path, source: str) -> list[Decision]:
-    """Every row of one returned file, blanks included (``label == ""``)."""
-    with path.open(encoding="utf-8", newline="") as fh:
+    """Every row of one returned file, blanks included (``label == ""``).
+
+    ``utf-8-sig``: a file saved back from a spreadsheet often starts with a BOM,
+    which would otherwise turn the first header into ``\ufefftext``.
+    """
+    with path.open(encoding="utf-8-sig", newline="") as fh:
         reader = csv.DictReader(fh)
         missing = {"text", "gold_categ"} - set(reader.fieldnames or ())
         if missing:

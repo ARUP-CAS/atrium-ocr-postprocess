@@ -2255,7 +2255,7 @@ def _has_strong_garbage_evidence(
 # waits on the annotation ask (docs/issue30/census.csv + sample.csv) and the open
 # questions in docs/issue30/README.md, not on code.
 #
-# UPDATE 2026-10-01 -- the annotation is back (docs/issue30/answers/2026-10-01/,
+# UPDATE 2026-10-01 -- the annotation is back (docs/issue30/census.csv + sample.csv,
 # 249 of 357 rows labelled, every blank non-Czech). Text-only with this
 # predicate and no lexicon: projected tail errors 4,844 -> 1,180, census head
 # 339 -> 358 (decipherable damage, which this route answers `Trash`; Q6 keeps
@@ -2335,7 +2335,7 @@ _RE_FUSED_GRID_REF: re.Pattern = re.compile(r"^[A-Za-z]{1,3}[-/][IVXLCDM]{1,7}[a
 # out of new letters -- and a roman numeral fused by a comma (`XXX,1937,str`,
 # `III,konec`) no longer looks like a roman numeral to `_RE_ROMAN_TOKEN`.
 #
-# Found in @DanaKriv's 357 decisions (2026-10-01, docs/issue30/answers/): the only
+# Found in @DanaKriv's 357 decisions (2026-10-01, docs/issue30/census.csv): the only
 # two at-risk lines she labelled `Clear` are exactly these, `XXX,1937,str. 21`
 # and `okraj sekt.III,konec`, and 41 of the rows she left blank -- readable German
 # find descriptions -- fired only because of a fused comma or slash. Splitting

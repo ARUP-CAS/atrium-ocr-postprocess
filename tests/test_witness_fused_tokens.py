@@ -9,7 +9,7 @@ a 30-letter string simply runs out of new letters -- and a roman numeral fused b
 a comma stopped looking like a roman numeral.
 
 Found in @DanaKriv's 357 decisions (returned 2026-10-01,
-docs/issue30/answers/2026-10-01/). The only two at-risk lines she labelled
+docs/issue30/census.csv + sample.csv). The only two at-risk lines she labelled
 `Clear` are both this shape, and so are 41 of the rows she left blank -- readable
 German find descriptions. One gold-`Trash` row is lost and is pinned below as the
 accepted cost, so a later change has to break a named line to move it.

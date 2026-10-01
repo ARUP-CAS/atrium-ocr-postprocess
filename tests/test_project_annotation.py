@@ -39,6 +39,7 @@ from tools.project_annotation import (  # noqa: E402
     read_decisions,
 )
 
+#: The return replaced the blank ask in place (2026-10-01); git history holds the ask.
 ANSWERS = _ROOT / "docs" / "issue30"
 HEADER = [
     "text",
@@ -76,6 +77,13 @@ def test_labels_are_normalised(raw, canon):
 def test_an_unknown_label_stops_the_run(raw):
     with pytest.raises(ValueError, match="gold_categ"):
         normalize_label(raw, "census.csv:7")
+
+
+def test_a_byte_order_mark_is_tolerated(tmp_path):
+    """A file saved back from a spreadsheet often starts with a BOM."""
+    path = tmp_path / "census.csv"
+    path.write_text("\ufefftext,gold_categ\nOUUITN,trash\n", encoding="utf-8")
+    assert [(d.text, d.label) for d in read_ask(path, "census")] == [("OUUITN", "Trash")]
 
 
 def test_parse_mix():
@@ -208,18 +216,27 @@ def test_join_refuses_an_empty_corpus(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_the_returned_files_are_the_ask_with_only_gold_filled():
-    for name in ("census.csv", "sample.csv"):
-        ask = list(csv.DictReader((_ROOT / "docs" / "issue30" / name).open(encoding="utf-8")))
-        ret = list(csv.DictReader((ANSWERS / name).open(encoding="utf-8")))
-        assert len(ask) == len(ret)
-        for a, r in zip(ask, ret, strict=True):
-            assert {k: v for k, v in a.items() if k != "gold_categ"} == {
-                k: v for k, v in r.items() if k != "gold_categ"
-            }
-    assert json.loads((ANSWERS / "frame.json").read_text()) == json.loads(
-        (_ROOT / "docs" / "issue30" / "frame.json").read_text()
-    )
+def test_the_return_keeps_the_shape_of_the_ask():
+    """Same columns, same rows, and the frame still describes the sample.
+
+    The return was checked column by column against the ask before it replaced it
+    (only `gold_categ` differed); this pins what can be checked without the ask.
+    """
+    from tools.build_annotation_sample import OUT_COLUMNS
+
+    rows = {}
+    for name, expected in (("census.csv", 157), ("sample.csv", 200)):
+        with (ANSWERS / name).open(encoding="utf-8", newline="") as fh:
+            reader = csv.DictReader(fh)
+            assert tuple(reader.fieldnames) == OUT_COLUMNS
+            rows[name] = list(reader)
+        assert len(rows[name]) == expected
+    frame = json.loads((ANSWERS / "frame.json").read_text(encoding="utf-8"))
+    drawn = {f["stratum"]: f["sampled"] for f in frame}
+    actual = {}
+    for r in rows["sample.csv"]:
+        actual[r["stratum"]] = actual.get(r["stratum"], 0) + 1
+    assert actual == drawn
 
 
 def test_the_2026_10_01_figures():

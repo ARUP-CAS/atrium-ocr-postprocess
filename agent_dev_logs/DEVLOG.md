@@ -1239,8 +1239,8 @@ week, ≈ 2026-10-02). Recorded in the #30 digest and plan; nothing switched on.
 
 * **What arrived:** @david-spacil's 2026-10-01 09:52 comment — Q1 ✅, Q2 ✅, Q4 `Clear`, Q5 a PR to follow, Q6
   "wait for the annotation, else `Trash`" — and `anotace_Dana.zip`: the ask's `census.csv` / `sample.csv` /
-  `frame.json` with `gold_categ` filled (249 of 357; every blank a non-Czech line). Stored as
-  `docs/issue30/answers/2026-10-01/`.
+  `frame.json` with `gold_categ` filled (249 of 357; every blank a non-Czech line). They replace the blank
+  ask in place in `docs/issue30/` (line endings normalised to LF; the diff is the labels only).
 * **Found:** D46 — the shape witness read comma- and slash-joined words as one token; both of Dana's at-risk `Clear`
   labels and 41 readable German blanks fired only because of it. Fixed witness-locally; the lexicon builder and
   `ocr_neighbours` follow, so the cluster table must be rebuilt.

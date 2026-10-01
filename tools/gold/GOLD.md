@@ -263,16 +263,17 @@ improvement from a regression; it is not enough to fit constants against.
 @DanaKriv's 357 decisions are **string-level**, not line-level: `census.csv` and
 `sample.csv` rows each settle every line carrying a spelling family, and
 `frame.json` says what each sampled row stands for. They live in
-`docs/issue30/answers/2026-10-01/`, not here, because they carry no locators.
+`docs/issue30/` — the returned `census.csv`, `sample.csv` and `frame.json` replaced
+the blank ask in place — not here, because they carry no locators.
 
 `tools/project_annotation.py` turns them into what this file describes:
 
 ```bash
 # What the labels say, projected through the frame (text only, seconds)
 python tools/project_annotation.py report \
-    --census docs/issue30/answers/2026-10-01/census.csv \
-    --sample docs/issue30/answers/2026-10-01/sample.csv \
-    --frame  docs/issue30/answers/2026-10-01/frame.json
+    --census docs/issue30/census.csv \
+    --sample docs/issue30/sample.csv \
+    --frame  docs/issue30/frame.json
 
 # A (file, page_num, line_num) sidecar over the archives the ask was cut from,
 # plus the list of documents to stage for ab_constant_eval.py
