@@ -30,6 +30,18 @@ import pytest
 import text_util as tu
 from text_util import shape_garbage_clauses
 
+
+@pytest.fixture(autouse=True)
+def _judged_without_the_archive_allow_list(without_allowed_words):
+    """This file is about the language split, not about `[allowed]`.
+
+    Since @david-spacil's Q5a list landed (2026-10-01) the shipped file spares
+    several of the words used below as examples, and Q5b makes a listed word never
+    evidence of damage. Held out here so these tests keep measuring the split;
+    the list itself is pinned in tests/test_word_lists.py.
+    """
+
+
 #: Correctly scanned German and French, with a three-vowel run. These are the
 #: lines the split exists for.
 NATIVE_TRIPHTHONGS = {

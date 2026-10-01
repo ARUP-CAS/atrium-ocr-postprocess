@@ -1044,9 +1044,9 @@ def compute_vowel_ratio(text: str) -> float:
 def _is_allowed_token(core: str) -> bool:
     """Is this token on the archive's hand-maintained allow list? (#30)
 
-    Reads `setup/word_lists.txt` `[allowed]`, which ships EMPTY -- so this returns
-    False for everything until an archive writes one, and every caller below is a
-    no-op in the shipped configuration.
+    Reads `setup/word_lists.txt` `[allowed]`. It shipped EMPTY until 2026-10-01;
+    since then it carries @david-spacil's reviewed entries (#30 Q5a, PR #7), so
+    every caller below is live for those words and for nothing else.
 
     WHAT IT MEANS, TWICE OVER. (1) The shape witness never reads it as evidence
     of damage: `shape_garbage_clauses()` skips it (#30 Q5b, answered yes on
@@ -2723,7 +2723,7 @@ def shape_garbage_clauses(text_source: str, lang: str | None = None) -> list[str
             # deliberately not taken. Still a veto only: a listed word cannot
             # convict anything, and an unlisted word on the same line is judged as
             # before (`ssuti vfetennl` still fires, on `vfetennl` alone if at all).
-            # `[allowed]` ships empty, so this is a no-op until entries land.
+            # Live since @david-spacil's reviewed entries landed (Q5a, PR #7).
             if _is_allowed_token(core):
                 continue
 

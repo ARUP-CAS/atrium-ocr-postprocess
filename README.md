@@ -606,12 +606,12 @@ As the script processes, it assigns each line one of five categories 🪧:
 > labels, section headings, short Czech function words, the rotation whitelists — live in
 > [`setup/word_lists.txt`](setup/word_lists.txt) (`WORD_LISTS_PATH`), one `[section]` each, with the
 > matching `setup/config.txt` keys kept empty as overrides. Its `[allowed]` section is for real words
-> the archive uses that the program keeps mistaking for damage; it **ships empty**, with the candidates
-> commented out, because switching one on changes stored categories. A listed word stops counting
-> against the quality score; it is not (yet) exempt from the shape witness — see
+> the archive uses that the program keeps mistaking for damage; since 2026-10-01 it ships the entries
+> the data providers reviewed (issue #30 Q5a), with the rest commented out. A listed word stops counting
+> against the quality score and is never evidence of damage to the shape witness (Q5b) — see
 > [`docs/categorization_logic.md`](docs/categorization_logic.md#composite-quality-score).
 > Separately, `DOMAIN_NOTATION_CATEG` in `[TEXT_UTILS]` names the category every recognised web or
-> e-mail address gets; it **ships empty = off**, pending the data providers' answer.
+> e-mail address gets; it ships **`Clear`** (issue #30 Q4; empty = off).
 
 > [!NOTE]
 > This script generates two primary output directories:

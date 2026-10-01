@@ -292,8 +292,8 @@ quality_score = max(0.0, (base_score / total_weight) − short_penalty)
 > by the four per-token measurements — `score_word()` returns 0.0 for it, and `detect_gibberish_words()`,
 > `detect_wx_words()` and `detect_fused_words()` do not count it — and `compute_valid_ratio()` treats it
 > as non-evaluable, the way a unit is (it leaves the denominator rather than joining the numerator).
-> Matching is exact and case-folded and does **not** fold diacritics. The section **ships empty**, with
-> its candidate words commented out, so the shipped score is unchanged.
+> Matching is exact and case-folded and does **not** fold diacritics. The section shipped empty until
+> 2026-10-01; it now carries the entries @david-spacil reviewed (Q5a), the rest commented out.
 >
 > **A listed word is never evidence of damage** (issue #30 Q5b, answered yes by @david-spacil and
 > @DanaKriv on 2026-10-01). Because a line made only of listed words has no gibberish and no

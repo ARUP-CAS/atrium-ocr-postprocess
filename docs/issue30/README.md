@@ -151,20 +151,14 @@ discard anything.
 * **It does:** stop the word counting against the line's quality score. That alone can move a line
   up a whole category, and it means a line made **only** of listed words can no longer be discarded
   by the short-line rule.
-* **It does not, yet:** stop the new rule's shape tests (three vowels in a row, a doubled first
-  letter, too few different letters) from reading the word. In a line that mixes a listed word with
-  other text, the new rule — once it is switched on — can still discard the line because of the
-  listed word alone. Checked in code on 2026-09-22: with `ssuti` listed and the rule on, `ssuti`
-  alone stays `Clear`, while `ssuti vfetennl` goes to `Trash` on `ssuti`'s doubled first letter.
+* **It also does** (✅ Q5b, 2026-10-01): stop the new rule's shape tests (three vowels in a row, a
+  doubled first letter, too few different letters) from reading the word, so a listed word can
+  never be the reason a line is discarded. The other words on the line are still read.
 
-Whether a listed word *should* also be exempt from those tests is ⏳ **open** — it is yours to
-decide, and it is Q5 (b) under "Still open" below.
-
-It ships empty on purpose. The words we already know about are in the file, commented out, with a
-note beside each — including the four @david-spacil has confirmed as real language (`ppole`,
-`ssuti`, `ssutí`, `ssutě`). Switching them on changes how lines are categorised, so that is a
-decision to take deliberately rather than a default we set for you. ⏳ **Which ones to switch on is
-also open** — Q5 (a) below.
+✅ **Q5a, 2026-10-01:** @david-spacil switched on the reviewed entries (pull request #7) — the old
+spellings and `ppole`, the German museum terms and place names, `malakofauna`, `diapozitiv`, and the
+Latin anatomy and taxonomy. The ones left out are still in the file, commented, with his reason
+beside each (`Bauerleihe` and `beuern` are scanning damage; `naiade` and `oueste` were not found).
 
 ---
 
@@ -179,7 +173,7 @@ decisions came back with it. What they settle, and what is left:
 | **Q2**  | ✅ The de-duplication step stays as it is.                                                                                                                                                                                                                                                                                                                |
 | **Q3**  | ✅ Returned: 249 of 357 rows labelled. **Every blank is a line that is not Czech** (German, Latin, English), so the labels say nothing yet about German words such as `Dauerleihe`.                                                                                                                                                                       |
 | **Q4**  | ✅ `Clear`. Now set: every recognised web or e-mail address is `Clear`.                                                                                                                                                                                                                                                                                   |
-| **Q5a** | ⏳ @david-spacil will send the `[allowed]` entries as a small pull request.                                                                                                                                                                                                                                                                               |
+| **Q5a** | ✅ Switched on by @david-spacil (pull request #7): the reviewed entries, with the rest left commented.                                                                                                                                                                                                                                                    |
 | **Q5b** | ✅ *Yes, listed means never evidence of damage* (@david-spacil, 2026-10-01). Done: the new rule skips a listed word in every test, so it can never be the reason a line is discarded; the other words on the line are still read. Your Q5a entries take effect through both the score and the new rule.                                                   |
 | **Q6**  | ✅ Answered by the labels: **`Trash`**. About a third of what the new rule would discard is decipherable, but nothing the program can see tells those lines apart reliably — a line with one damaged word next to a clean one looked promising in the common text and failed in the rare text. Your fallback was "prefer `Trash`", so that is what stays. |
 
@@ -197,7 +191,7 @@ decisions came back with it. What they settle, and what is left:
 
 ## ⏳ Still open — asked in the issue thread on 2026-09-22 (Q8: 2026-09-23)
 
-> **2026-10-01:** Q1–Q6 are answered (above); Q5a's entries come with @david-spacil's pull request.
+> **2026-10-01:** Q1–Q6 are answered (above), and Q5a's entries are switched on (pull request #7).
 > The table below is kept as asked.
 
 Posted after [comment 61](https://github.com/ufal/atrium-alto-postprocess/issues/30#issuecomment-5783543756)

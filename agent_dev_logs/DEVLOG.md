@@ -1273,3 +1273,18 @@ week, ≈ 2026-10-02). Recorded in the #30 digest and plan; nothing switched on.
   PR says so in its own log.
 
   **Not pushed: files delivered in chat.**
+
+## 2026-10-01 (evening) — #30: Q5a landed (PR #7), 19 tests re-pointed
+
+* **What arrived:** @david-spacil's PR #7 (`115e632`, merged on `test` as `411de7f`) switched on 34 reviewed `[allowed]`
+  entries; with Q5b live, they are never evidence of damage to the witness.
+* **Broke:** 19 tests — 12 in the lexicon / language-split / witness-report suites that used the listed words as
+  shape-only examples, 7 in `tests/test_word_lists.py` that pinned an empty list.
+* **Fixed:** `without_allowed_words` fixture in `tests/conftest.py` (the shipped file with only the `[allowed]`
+  entries removed) for the mechanism tests; `REVIEWED_ALLOWED` pins the shipped set; new
+  `test_the_shipped_list_reaches_the_witness`. Stale "ships empty" wording fixed in `text_util.py`,
+  `setup/config.txt`, `setup/word_lists.txt`, `README.md` (also its stale `DOMAIN_NOTATION_CATEG` line),
+  `docs/categorization_logic.md`, `docs/issue30/README.md`.
+
+  **Not pushed: files delivered in chat.**
+

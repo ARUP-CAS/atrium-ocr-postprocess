@@ -47,11 +47,12 @@
 # local abbreviations, anything the archive uses that a Czech word list would not
 # contain.
 #
-# IT SHIPS EMPTY. The candidates below are real — every one is a word this issue
-# has confirmed the program treats wrongly — but switching them on changes stored
-# categories, so uncommenting is a deliberate, measurable act and not a default.
-# Uncomment what this archive wants, then re-score and compare. Which ones to
-# switch on is Q5a in issue #30; until it is answered they stay commented out.
+# REVIEWED 2026-10-01 (issue #30 Q5a, @david-spacil). The entries below that are
+# not commented out are switched on; the commented ones were left out on review,
+# with the reason beside each. Switching an entry on or off changes stored
+# categories, so it is a deliberate, measurable act: change it here, re-score and
+# compare. tests/test_word_lists.py pins the reviewed set, so an edit here has to
+# be made there too.
 [allowed]
 # ── old and dialect spellings ──
 ssuti        # old spelling of `suť` (rubble) — @david-spacil, 2026-09-22

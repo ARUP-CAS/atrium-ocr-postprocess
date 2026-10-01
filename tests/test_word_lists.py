@@ -13,9 +13,9 @@ where no archivist will ever find it. And the one mechanism meant to cover
 open-class words, `SHORT_GARBAGE_LEXICON_PATH`, ships EMPTY with no frequency
 table anywhere in the repository. So the shipped configuration had no open-class
 protection at all. The file's `[allowed]` section is where that layer goes, not a
-duplicate of an existing one -- but it is not the layer yet: every entry ships
-commented out (which to switch on is Q5a), and an entry reaches the quality score
-and -- since Q5b was answered yes on 2026-10-01 -- the witness's shape tests.
+duplicate of an existing one. Since 2026-10-01 it ships @david-spacil's reviewed
+entries (Q5a), and an entry reaches the quality score and -- Q5b, answered yes the
+same day -- the witness's shape tests.
 
 WHAT IS PINNED HERE. Mostly that the migration is a NO-OP: each list read from
 the file must equal the literal that was compiled into `text_util.py` before it.
@@ -61,15 +61,34 @@ def test_every_migrated_list_is_non_empty_and_lowercase(section, const):
     assert all(t == t.lower() for t in live), f"[{section}] carries an uncased token"
 
 
-def test_the_allowed_section_ships_empty():
-    """It is wired and not armed, the same split used for the shape witness.
+#: (#30 Q5a) The entries @david-spacil switched on, 2026-10-01 (PR #7). Changing
+#: the shipped list changes stored categories, so it has to change this set too:
+#: an edit to the file alone fails here and has to be made on purpose.
+REVIEWED_ALLOWED = frozenset(
+    {
+        # old spellings and house conventions
+        "ssuti", "ssutí", "ssutě", "ppole",
+        # German the archive contains
+        "dauerleihe", "neuotting", "feuilleton", "forsterhaus", "kaukasus", "hallstatthaus", "kaaden",
+        # Czech terms the program kept mistaking
+        "malakofauna", "diapozitiv",
+        # Latin anatomy and taxonomy
+        "occipitale", "equus", "caballus", "triticum", "monococcum", "lepus", "europaeus",
+        "arvicola", "terrestris", "linum", "usitatissimum",
+        "poaceae", "rosaceae", "fabaceae", "brassicaceae", "cyperaceae", "chenopodiaceae",
+        "asteraceae", "betulaceae", "fagaceae", "polygonaceae",
+    }
+)  # fmt: skip
 
-    The candidates are in the file as a COMMENTED block with their provenance.
-    Uncommenting changes stored categories, so it is a deliberate act and not a
-    default — and it keeps the migration commit a true no-op, so a number that
-    moves has exactly one possible cause.
+
+def test_the_allowed_section_ships_the_reviewed_list():
+    """Q5a, settled: the reviewed candidates are on, the rest stay commented out.
+
+    Left out on review, with his notes in the file: `Bauerleihe` and `beuern` are
+    OCR damage, `naiade` / `oueste` were not found in the corpus, and
+    `Schuhleistenkeilbruchstueck` stays a candidate.
     """
-    assert tu.word_list("allowed", frozenset()) == frozenset()
+    assert tu.word_list("allowed", frozenset()) == REVIEWED_ALLOWED
 
 
 def test_an_empty_path_falls_back_to_the_compiled_in_values():
@@ -173,11 +192,27 @@ def _armed(tmp_path, *tokens):
     return tu.override_constants({"WORD_LISTS_PATH": str(path)})
 
 
-def test_nothing_is_allowed_in_the_shipped_configuration():
-    """Step 2's no-op proof at the predicate. [allowed] ships empty, so every call
-    site below is inert until an archive writes a list."""
-    for token in ("kaukasus", "ssuti", "Dauerleihe", "oueussd"):
+def test_only_reviewed_words_are_allowed_in_the_shipped_configuration():
+    """The list is a list of words, not a pattern: garbage and the entries left
+    out on review stay unlisted."""
+    for token in ("kaukasus", "ssuti", "Dauerleihe", "Triticum"):
+        assert tu._is_allowed_token(token) is True
+    for token in ("oueussd", "vfetennl", "Bauerleihe", "beuern", "Schuhleistenkeilbruchstueck"):
         assert tu._is_allowed_token(token) is False
+
+
+def test_the_shipped_list_reaches_the_witness():
+    """Q5a + Q5b at the shipped configuration: what the list was switched on for."""
+    for text, lang in (
+        ("ssuti", None),
+        ("Dauerleihe", "ces_Latn"),
+        ("Kaukasus", None),
+        ("Triticum monococcum", None),
+        ("Hallstatthaus", None),
+    ):
+        assert tu.shape_garbage_clauses(text, lang) == [], text
+    # The entries left out on review are still read.
+    assert tu.shape_garbage_clauses("Bauerleihe", "ces_Latn") == ["vowel_run"]
 
 
 def test_a_listed_token_stops_counting_in_all_four_score_components(tmp_path):
@@ -207,7 +242,7 @@ def test_a_listed_token_is_non_evaluable_not_valid(tmp_path):
         assert tu.compute_valid_ratio("Roe<toeovy") == pytest.approx(1.0)  # evaluable == 0 -> 1.0
 
 
-def test_listing_a_token_that_was_never_penalised_does_nothing(tmp_path):
+def test_listing_a_token_that_was_never_penalised_does_nothing(tmp_path, without_allowed_words):
     """The safe direction to be wrong in, and worth pinning: an archivist adding a
     word "just in case" must not move anything."""
     before = tu.score_word("Kaukasus"), tu.detect_fused_words("Kaukasus"), tu.compute_valid_ratio("Kaukasus")
@@ -250,7 +285,7 @@ def test_matching_is_case_folded_but_does_not_fold_diacritics(tmp_path):
     "token,clause",
     [("ssuti", "initial_geminate"), ("Dauerleihe", "vowel_run"), ("Kaukasus", "low_variety")],
 )
-def test_a_listed_word_is_never_evidence_of_damage(tmp_path, token, clause):
+def test_a_listed_word_is_never_evidence_of_damage(tmp_path, without_allowed_words, token, clause):
     assert clause in tu.shape_garbage_clauses(token), "premise: convicted before listing"
     with _armed(tmp_path, token.lower()):
         assert tu.shape_garbage_clauses(token) == []
@@ -263,7 +298,7 @@ def test_a_listed_word_does_not_shield_the_rest_of_the_line(tmp_path):
         assert tu.shape_garbage_clauses("ssuti oueussd") == ["vowel_run"]
 
 
-def test_the_listed_word_is_exempt_from_the_unattested_clause_too(tmp_path):
+def test_the_listed_word_is_exempt_from_the_unattested_clause_too(tmp_path, without_allowed_words):
     """`no_vocabulary` is the one clause that can add a conviction; a listed word
     must not reach it either, lexicon or not."""
     table = tmp_path / "df.tsv"
@@ -275,7 +310,7 @@ def test_the_listed_word_is_exempt_from_the_unattested_clause_too(tmp_path):
             assert tu.shape_garbage_clauses("Hallstatthaus") == []
 
 
-def test_the_short_line_penalty_makes_the_effect_a_cliff_not_a_weight_share(tmp_path):
+def test_the_short_line_penalty_makes_the_effect_a_cliff_not_a_weight_share(tmp_path, without_allowed_words):
     """MEASURED, because the plan said to measure it rather than reason about it.
 
     The four per-token components are 0.60 of the score's weight, so the naive
@@ -288,10 +323,10 @@ def test_the_short_line_penalty_makes_the_effect_a_cliff_not_a_weight_share(tmp_
         `Dauerleihe` (10 chars)  0.5870 -> 0.8800   +0.2930
 
     That crosses a category boundary -- `CATEG_TRASH_SCORE_MAX` is 0.55 and the
-    `Clear` band opens at 0.70 -- which is precisely why `[allowed]` ships empty
-    and its candidates ship commented out. Arming it is a categorisation change,
-    not a tuning nudge, and it is measured before it is switched on rather than
-    after.
+    `Clear` band opens at 0.70 -- which is precisely why `[allowed]` shipped empty
+    until its candidates were reviewed (Q5a). Arming an entry is a categorisation
+    change, not a tuning nudge. Measured here with the shipped list held out, so
+    `before` is the unlisted score.
     """
 
     def score(text: str) -> float:

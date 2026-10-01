@@ -299,10 +299,10 @@ SHORT_GARBAGE_WITNESS_ENABLE            = false
 # to cover it -- SHORT_GARBAGE_LEXICON_PATH, a corpus frequency table -- ships
 # EMPTY and no such table exists anywhere in this repository. So in the shipped
 # configuration there was no open-class protection at all. The `[allowed]` section
-# that fills the gap ships with every entry COMMENTED OUT (which to switch on is
-# Q5a, @david-spacil's PR), and an entry reaches both the quality score and --
-# since Q5b was answered yes on 2026-10-01 -- the witness's shape tests, which
-# skip a listed word, so it can never be the reason a line is discarded.
+# fills the gap: since 2026-10-01 it carries @david-spacil's reviewed entries
+# (Q5a, PR #7), and an entry reaches both the quality score and -- Q5b, answered
+# yes the same day -- the witness's shape tests, which skip a listed word, so it
+# can never be the reason a line is discarded.
 #
 # Every section in that file is a VETO: it can stop a conviction, never create
 # one. Relative paths resolve against text_util.py, not the working directory.

@@ -45,6 +45,18 @@ if str(_ROOT) not in sys.path:
 import text_util as tu  # noqa: E402
 from text_util import _has_shape_garbage_evidence, shape_garbage_clauses  # noqa: E402
 
+
+@pytest.fixture(autouse=True)
+def _judged_without_the_archive_allow_list(without_allowed_words):
+    """This file is about the shape clauses and the lexicon veto, not about `[allowed]`.
+
+    Since @david-spacil's Q5a list landed (2026-10-01) the shipped file spares
+    several of the words used below as examples, and Q5b makes a listed word never
+    evidence of damage. Held out here so these tests keep measuring those;
+    the list itself is pinned in tests/test_word_lists.py.
+    """
+
+
 # ---------------------------------------------------------------------------
 # Populations
 # ---------------------------------------------------------------------------

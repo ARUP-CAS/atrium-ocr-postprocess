@@ -426,6 +426,7 @@ def test_a_group_is_all_or_nothing_for_the_witness(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.usefixtures("without_allowed_words")  # `Dauerleihe` is in the shipped [allowed] list (Q5a)
 def test_classify_line_passes_the_language_to_the_witness():
     assert R.classify_line("Dauerleihe", 1, "ces_Latn")["witness"]
     assert not R.classify_line("Dauerleihe", 1, "deu_Latn")["witness"]
@@ -435,6 +436,7 @@ def test_classify_line_passes_the_language_to_the_witness():
     assert R.clauses_for_line("Dauerleihe", "deu_Latn") == tu.shape_garbage_clauses("Dauerleihe", "deu_Latn")
 
 
+@pytest.mark.usefixtures("without_allowed_words")  # `Dauerleihe` is in the shipped [allowed] list (Q5a)
 def test_a_csv_row_is_judged_in_its_own_detected_language(tmp_path):
     src = tmp_path / "CTX000000000.csv"
     with src.open("w", newline="", encoding="utf-8") as handle:
