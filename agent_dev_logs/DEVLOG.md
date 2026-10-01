@@ -1287,4 +1287,3 @@ week, ≈ 2026-10-02). Recorded in the #30 digest and plan; nothing switched on.
   `docs/categorization_logic.md`, `docs/issue30/README.md`.
 
   **Not pushed: files delivered in chat.**
-
